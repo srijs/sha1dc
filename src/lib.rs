@@ -196,14 +196,8 @@ struct Inner {
     reduced_round_collision: bool,
     /// True if a collision occurred.
     found_collision: bool,
-    /// This block's input chaining value, and the one the partner block
-    /// would have.
-    ihv1: [u32; STATE_LEN],
-    ihv2: [u32; STATE_LEN],
-    /// This block's expanded message schedule, and the partner's, which is
-    /// this one XOR a DV's difference.
+    /// This block's expanded message schedule.
     m1: [u32; 80],
-    m2: [u32; 80],
     /// Earlier states, which make recompression faster.
     state_58: [u32; STATE_LEN],
     state_65: [u32; STATE_LEN],
@@ -226,10 +220,7 @@ impl Inner {
             ubc_check: builder.ubc_check,
             reduced_round_collision: builder.reduced_round_collisions,
             found_collision: false,
-            ihv1: [0; STATE_LEN],
-            ihv2: [0; STATE_LEN],
             m1: [0; 80],
-            m2: [0; 80],
             state_58: [0; STATE_LEN],
             state_65: [0; STATE_LEN],
         }
@@ -269,10 +260,7 @@ impl Inner {
         self.buffer_len = 0;
         // Keep the configuration.
         self.found_collision = false;
-        self.ihv1 = [0; STATE_LEN];
-        self.ihv2 = [0; STATE_LEN];
         self.m1 = [0; 80];
-        self.m2 = [0; 80];
         self.state_58 = [0; STATE_LEN];
         self.state_65 = [0; STATE_LEN];
     }
