@@ -59,7 +59,7 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
       - name: Generated code is current
-        run: ./codegen/check.sh
+        run: cargo run -p sha1dc-codegen -- --check
       - name: Minimum supported Rust version
         run: cargo +1.85.0 check --lib --all-features
       - name: Package
