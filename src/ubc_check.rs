@@ -227,6 +227,25 @@ const DVS: [(DvType, u32, u32, RecompressFrom); 32] = [
 /// The list of SHA-1 Disturbance Vectors (DV) to check.
 pub(crate) const SHA1_DVS: [Info; 32] = build_dvs();
 
+/// The candidate bits whose DVs recompress from step 58.
+///
+/// State recovery on a hardware backend reaches step 65 first and step 58
+/// only with seven further steps, so it asks this whether the extra steps
+/// are wanted.
+pub(crate) const STEP58_MASK: u32 = build_step58_mask();
+
+const fn build_step58_mask() -> u32 {
+    let mut mask = 0;
+    let mut i = 0;
+    while i < DVS.len() {
+        if DVS[i].3 as u32 == RecompressFrom::Step58 as u32 {
+            mask |= 1 << i;
+        }
+        i += 1;
+    }
+    mask
+}
+
 const fn build_dvs() -> [Info; 32] {
     let mut out = [Info {
         recompress_from: RecompressFrom::Step58,

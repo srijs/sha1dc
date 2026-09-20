@@ -1,6 +1,6 @@
 //! SHA-1 block compression, and the recompression that detection needs.
 //!
-//! Everything here runs whatever backend is in use. [`states_from_w`]
+//! Everything here runs whatever backend is in use. [`states_back_from_h`]
 //! recovers the states a hardware backend does not spill,
 //! [`recompression_step`] is the detection itself, and [`compression_w`] is
 //! the mitigation. The steps themselves are also the scalar backend, in
@@ -33,9 +33,11 @@
 //! stored state to step 0, then forwards to step 80, and adds the two to get
 //! the output chaining value the pair would share.
 //!
-//! Steps 58 and 65 are the two the DV table names, so [`compression_states`]
-//! stores the state there on the way past. A stored state is in the order
-//! `(A, B, C, D, E)` of the step it belongs to.
+//! Steps 58 and 65 are the two the DV table names. The scalar backend stores
+//! the state there on the way past; a hardware backend does not, so
+//! [`states_back_from_h`] recovers it afterwards by running the end of the
+//! compression in reverse. A stored state is in the order `(A, B, C, D, E)`
+//! of the step it belongs to.
 //!
 //! [FIPS 180-1]: https://csrc.nist.gov/pubs/fips/180-1/final
 //! [paper]: https://marc-stevens.nl/research/papers/C13-S.pdf
@@ -204,11 +206,54 @@ pub(crate) fn compression_w(ihv: &mut [u32; 5], w: &[u32; 80]) {
     add(ihv, [a, b, c, d, e]);
 }
 
+/// Recovers the stored states by running *backwards* from the output.
+///
+/// The hardware backends give the schedule but not the states. Both chaining
+/// values are known by the time detection asks for them, and their difference
+/// is the state at step 80, so the two states the DV table names are 15 and
+/// 22 steps back from the end rather than 58 and 65 steps forward from the
+/// start. `need_58` says whether the seven steps past step 65 are wanted;
+/// a block whose candidates all recompress from step 65 does not need them.
+pub(crate) fn states_back_from_h(
+    ihv_before: &[u32; 5],
+    ihv_after: &[u32; 5],
+    w: &[u32; 80],
+    need_58: bool,
+    state_58: &mut [u32; 5],
+    state_65: &mut [u32; 5],
+) {
+    // The state at step 80, which the final addition hid.
+    let [mut a, mut b, mut c, mut d, mut e] = [
+        ihv_after[0].wrapping_sub(ihv_before[0]),
+        ihv_after[1].wrapping_sub(ihv_before[1]),
+        ihv_after[2].wrapping_sub(ihv_before[2]),
+        ihv_after[3].wrapping_sub(ihv_before[3]),
+        ihv_after[4].wrapping_sub(ihv_before[4]),
+    ];
+
+    // Fifteen steps back is three whole turns of the names, so step 65 comes
+    // out in order.
+    unfive!(parity, K[3], a, b, c, d, e, w, 75);
+    unfive!(parity, K[3], a, b, c, d, e, w, 70);
+    unfive!(parity, K[3], a, b, c, d, e, w, 65);
+    *state_65 = [a, b, c, d, e];
+
+    if need_58 {
+        unfive!(parity, K[3], a, b, c, d, e, w, 60);
+        // Steps 59 and 58 are in the third round, and leave the names two
+        // places round.
+        unstep!(maj, K[2], a, b, c, d, e, w[59]);
+        unstep!(maj, K[2], b, c, d, e, a, w[58]);
+        *state_58 = [c, d, e, a, b];
+    }
+}
+
 /// Recovers the two stored states from a schedule that is already expanded.
 ///
-/// The hardware backends give the schedule but not the states. This runs the
-/// 65 steps that lead to them, and no more, so it is cheaper than repeating
-/// the whole compression.
+/// This runs the 65 steps that lead to them and no more. It is the forward
+/// reference that [`states_back_from_h`] is checked against; the hardware
+/// path uses the backward form, which is fewer steps.
+#[cfg(test)]
 pub(crate) fn states_from_w(
     ihv: &[u32; 5],
     w: &[u32; 80],
