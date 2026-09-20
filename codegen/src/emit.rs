@@ -1,9 +1,11 @@
 //! Shared helpers for the emitters.
 //!
-//! [`crate::solve`] decides which checks run in the prefix. Everything here
-//! is about turning that decision into source.
+//! [`crate::solve`] decides which checks run in the prefix and how they group.
+//! Everything here is about turning that decision into source: lining up the
+//! two bits, cutting a family into vector-sized pieces, and ordering the
+//! pieces.
 
-use crate::solve::Family;
+use crate::solve::{Family, Plan};
 use crate::ubc::DV_NAMES;
 
 /// How the two words are lined up so that one bit test covers both. Returns
@@ -24,6 +26,60 @@ pub fn dv_expr(dvs: u32) -> String {
         .map(|n| DV_NAMES[n])
         .collect();
     names.join(" | ")
+}
+
+/// One vector group: the checks that share a pair of loads.
+pub type Group = Vec<(usize, String)>;
+
+/// Only a continuous range can share one vector load.
+pub fn lane_groups(f: &Family, width: usize) -> Vec<Group> {
+    let mut runs: Vec<Group> = Vec::new();
+    for &(i, dvs) in &f.members {
+        match runs.last_mut() {
+            Some(run) if run.last().unwrap().0 + 1 == i => run.push((i, dv_expr(dvs))),
+            _ => runs.push(vec![(i, dv_expr(dvs))]),
+        }
+    }
+    runs.iter()
+        .flat_map(|r| r.chunks(width).map(<[_]>::to_vec))
+        .collect()
+}
+
+/// Every lane group with its family. Both vector emitters read this list, so
+/// they always agree.
+pub fn all_groups(plan: &Plan, width: usize) -> Vec<(&Family, Group)> {
+    let mut groups: Vec<_> = plan
+        .families
+        .iter()
+        .flat_map(|f| lane_groups(f, width).into_iter().map(move |g| (f, g)))
+        .collect();
+    // Earliest-available first: a group's loads cannot issue until the
+    // compression has produced the highest schedule word it reads, and every
+    // later OR into the same accumulator waits behind it.
+    groups.sort_by_key(|(f, g)| g[0].0 + f.offset + width - 1);
+    groups
+}
+
+/// The highest `w` index any group reads, for the safety comment.
+pub fn highest_read(plan: &Plan, width: usize) -> usize {
+    all_groups(plan, width)
+        .iter()
+        .map(|(f, g)| g[0].0 + f.offset + width - 1)
+        .max()
+        .unwrap_or(0)
+}
+
+/// Lane initializers. A short group gets a mask that clears no bits, so the
+/// group still fills one vector.
+pub fn lanes(bits: &[&str], indent: &str, width: usize) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    for i in 0..width {
+        let value = bits.get(i).copied().unwrap_or("0");
+        let _ = write!(out, "\n{indent}    {value},");
+    }
+    let _ = write!(out, "\n{indent}");
+    out
 }
 
 /// The header at the top of every generated file.

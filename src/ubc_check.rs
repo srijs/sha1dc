@@ -283,6 +283,20 @@ mod tests {
         }
     }
 
+    /// The vectorized prefix must agree with the scalar form it came from. A
+    /// prefix that clears too few bits still gives correct digests and only
+    /// causes more recompressions, so no other test detects it.
+    #[test]
+    fn vectorized_prefix_matches_scalar() {
+        schedules(20_000, |w| {
+            assert_eq!(
+                prefix::mask(w),
+                prefix::scalar::mask(w),
+                "vectorized prefix diverged"
+            );
+        });
+    }
+
     /// Compares the derived DV table against the values in the C original.
     ///
     /// The checksum covers the written-out table that this crate had before
