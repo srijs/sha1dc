@@ -8,6 +8,10 @@
 use crate::solve::{Family, Plan};
 use crate::ubc::DV_NAMES;
 
+/// Words in the expanded message schedule. Every emitted form takes
+/// `&[u32; SCHEDULE]`, and a read past it is out of bounds.
+const SCHEDULE: usize = 80;
+
 /// How the two words are lined up so that one bit test covers both. Returns
 /// the shift to apply and the bit to test. A positive shift moves `far` down,
 /// a negative shift moves `near` down.
@@ -60,13 +64,22 @@ pub fn all_groups(plan: &Plan, width: usize) -> Vec<(&Family, Group)> {
     groups
 }
 
-/// The highest `w` index any group reads, for the safety comment.
+/// The highest `w` index any group reads, for the module comment.
+///
+/// The emitted `load` proves its own bound at compile time, so this is the
+/// second line of defence rather than the only one. It fails here, naming the
+/// table, rather than inside a generated `const` block.
 pub fn highest_read(plan: &Plan, width: usize) -> usize {
-    all_groups(plan, width)
+    let high = all_groups(plan, width)
         .iter()
         .map(|(f, g)| g[0].0 + f.offset + width - 1)
         .max()
-        .unwrap_or(0)
+        .unwrap_or(0);
+    assert!(
+        high < SCHEDULE,
+        "a group reads w[{high}], past the {SCHEDULE}-word schedule"
+    );
+    high
 }
 
 /// Lane initializers. A short group gets a mask that clears no bits, so the
@@ -104,12 +117,15 @@ pub fn module(name: &str, prefix: &str, tail: &str) -> String {
 }
 "#;
 
+    // `#[target_feature]` on a safe function makes the body safe code: the
+    // intrinsics need no `unsafe`, and a caller that cannot prove the feature
+    // still has to write one. What is left of the unsafety is in `load`.
     let check = match feature {
         None => format!(
             "/// Runs the whole check.\n#[inline(always)]\npub(super) fn check(w: &[u32; 80]) -> u32 {{\n{BODY}"
         ),
         Some(f) => format!(
-            "/// Runs the whole check.\n///\n/// # Safety\n///\n/// Requires `{f}`. All reads stay in `w`.\n#[target_feature(enable = \"{f}\")]\n#[allow(unsafe_op_in_unsafe_fn)]\npub(super) unsafe fn check(w: &[u32; 80]) -> u32 {{\n{BODY}"
+            "/// Runs the whole check. Requires `{f}`, so a caller that cannot\n/// prove the feature needs an `unsafe` block.\n#[target_feature(enable = \"{f}\")]\npub(super) fn check(w: &[u32; 80]) -> u32 {{\n{BODY}"
         ),
     };
 
@@ -121,7 +137,83 @@ pub fn module(name: &str, prefix: &str, tail: &str) -> String {
          //! target's plan in `codegen/src/main.rs`, and re-run it.\n\
          \n\
          use crate::ubc_check::*;\n\
-         \n\
-         {check}\n{prefix}\n{tail}"
+         {}\n\
+         {check}\n{prefix}\n{tail}",
+        preamble(name)
+    )
+}
+
+/// The arch import and the loads, for one target.
+///
+/// Everything the generated body does with a raw pointer goes through here,
+/// so a whole module has one `unsafe` block per load shape and none in the
+/// hundreds of lines that follow.
+fn preamble(name: &str) -> String {
+    match name {
+        "scalar" => String::new(),
+        "neon" => format!(
+            "\nuse core::arch::aarch64::*;\n{}{}",
+            load("neon", 4, "uint32x4_t", "vld1q_u32(w.as_ptr().add(I))"),
+            SPLAT
+        ),
+        "sse2" => format!(
+            "{X86_IMPORTS}{}",
+            load(
+                "sse2",
+                4,
+                "__m128i",
+                "_mm_loadu_si128(w.as_ptr().add(I).cast())"
+            )
+        ),
+        "avx2" => format!(
+            "{X86_IMPORTS}{}",
+            load(
+                "avx2",
+                8,
+                "__m256i",
+                "_mm256_loadu_si256(w.as_ptr().add(I).cast())"
+            )
+        ),
+        other => panic!("no preamble for {other}"),
+    }
+}
+
+const X86_IMPORTS: &str = r#"
+#[cfg(target_arch = "x86")]
+use core::arch::x86::*;
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64::*;
+"#;
+
+/// NEON has no intrinsic that takes four lanes directly, so the DV bits go
+/// through memory like the schedule words do.
+const SPLAT: &str = r#"
+/// The DV bits of a group, as a vector.
+#[inline]
+#[target_feature(enable = "neon")]
+fn splat(bits: [u32; 4]) -> uint32x4_t {
+    // SAFETY: `vld1q_u32` reads four words, the length of `bits`.
+    unsafe { vld1q_u32(bits.as_ptr()) }
+}
+"#;
+
+/// The one load a generated body uses.
+///
+/// `I` is a const parameter, so the bound is a compile error at the call site
+/// rather than a promise in a comment, and it holds for every plan this
+/// generator can emit rather than only the one committed.
+fn load(feature: &str, width: usize, ty: &str, call: &str) -> String {
+    format!(
+        r#"
+/// The {width} schedule words starting at `I`.
+#[inline]
+#[target_feature(enable = "{feature}")]
+fn load<const I: usize>(w: &[u32; {SCHEDULE}]) -> {ty} {{
+    const {{ assert!(I + {width} <= {SCHEDULE}, "a group reads past the schedule") }}
+    // SAFETY: the const assert above proves `w[I..I + {width}]` is in bounds,
+    // which is the whole of what this reads.
+    unsafe {{ {call} }}
+}}
+"#
     )
 }

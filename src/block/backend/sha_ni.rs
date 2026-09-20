@@ -24,10 +24,46 @@ use core::arch::x86_64::*;
 const REVERSE: i32 = 0b00_01_10_11;
 
 /// Writes the four words a group is about to use into the schedule.
-macro_rules! spill {
-    ($w:expr, $t:expr, $msg:expr) => {
-        _mm_storeu_si128($w.add($t).cast(), _mm_shuffle_epi32($msg, REVERSE))
-    };
+///
+/// `I` is a const parameter, so a spill past the end of the schedule is a
+/// compile error at the call site rather than a promise in a comment.
+#[inline]
+#[target_feature(enable = "sse2")]
+fn spill<const I: usize>(w: &mut [u32; 80], msg: __m128i) {
+    const { assert!(I + 4 <= 80, "the spill runs past the schedule") }
+    let ordered = _mm_shuffle_epi32(msg, REVERSE);
+    // SAFETY: the const assert above proves `w[I..I + 4]` is in bounds,
+    // which is the whole of what this writes.
+    unsafe { _mm_storeu_si128(w.as_mut_ptr().add(I).cast(), ordered) }
+}
+
+/// The four message words starting at byte `I`, in native order.
+#[inline]
+#[target_feature(enable = "sse2,ssse3")]
+fn msg<const I: usize>(block: &[u8; 64], swap: __m128i) -> __m128i {
+    const { assert!(I + 16 <= 64, "the load runs past the block") }
+    // SAFETY: the const assert above proves `block[I..I + 16]` is in bounds,
+    // which is the whole of what this reads.
+    let raw = unsafe { _mm_loadu_si128(block.as_ptr().add(I).cast()) };
+    _mm_shuffle_epi8(raw, swap)
+}
+
+/// The `abcd` half of the state. The fifth word is carried on its own.
+#[inline]
+#[target_feature(enable = "sse2")]
+fn load_abcd(state: &[u32; 5]) -> __m128i {
+    // SAFETY: `_mm_loadu_si128` reads four words, and `state` has five.
+    let raw = unsafe { _mm_loadu_si128(state.as_ptr().cast()) };
+    _mm_shuffle_epi32(raw, REVERSE)
+}
+
+/// Writes `abcd` back, leaving the fifth word alone.
+#[inline]
+#[target_feature(enable = "sse2")]
+fn store_abcd(state: &mut [u32; 5], abcd: __m128i) {
+    let ordered = _mm_shuffle_epi32(abcd, REVERSE);
+    // SAFETY: `_mm_storeu_si128` writes four words, and `state` has five.
+    unsafe { _mm_storeu_si128(state.as_mut_ptr().cast(), ordered) }
 }
 
 /// One group of four rounds, once the schedule is under way.
@@ -38,10 +74,10 @@ macro_rules! spill {
 /// in `held`.
 macro_rules! group {
     (
-        $w:expr, $t:expr, $k:expr, $abcd:ident, $live:ident, $held:ident,
+        $w:expr, $t:literal, $k:expr, $abcd:ident, $live:ident, $held:ident,
         $ready:ident, $next:ident, $second:ident, $first:ident
     ) => {{
-        spill!($w, $t, $ready);
+        spill::<$t>($w, $ready);
         $live = _mm_sha1nexte_epu32($live, $ready);
         $held = $abcd;
         $next = _mm_sha1msg2_epu32($next, $ready);
@@ -52,48 +88,46 @@ macro_rules! group {
 }
 
 /// Compresses one block, spilling the message schedule into `w`.
+///
+/// Requires `sha`, `sse2`, `ssse3` and `sse4.1`, so a caller that cannot
+/// prove the features needs an `unsafe` block.
 #[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
-#[allow(unsafe_op_in_unsafe_fn)]
-#[allow(clippy::too_many_lines)]
-pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut [u32; 80]) {
+pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut [u32; 80]) {
     // Turns the big-endian message into native order, reversing the four
     // words along with the bytes.
     let swap = _mm_set_epi64x(0x0001_0203_0405_0607, 0x0809_0A0B_0C0D_0E0F);
 
-    let wp = w.as_mut_ptr();
-    let data: *const __m128i = block.as_ptr().cast();
-
-    let mut abcd = _mm_shuffle_epi32(_mm_loadu_si128(state.as_ptr().cast()), REVERSE);
+    let mut abcd = load_abcd(state);
     let abcd_in = abcd;
     let e_in = _mm_set_epi32(state[4] as i32, 0, 0, 0);
 
-    let mut msg0 = _mm_shuffle_epi8(_mm_loadu_si128(data.add(0)), swap);
-    let mut msg1 = _mm_shuffle_epi8(_mm_loadu_si128(data.add(1)), swap);
-    let mut msg2 = _mm_shuffle_epi8(_mm_loadu_si128(data.add(2)), swap);
-    let mut msg3 = _mm_shuffle_epi8(_mm_loadu_si128(data.add(3)), swap);
+    let mut msg0 = msg::<0>(block, swap);
+    let mut msg1 = msg::<16>(block, swap);
+    let mut msg2 = msg::<32>(block, swap);
+    let mut msg3 = msg::<48>(block, swap);
 
     // The first sixteen words are the block itself. The expansion starts as
     // soon as enough of them are in, so these four groups build up to the
     // steady shape of `group!`.
-    spill!(wp, 0, msg0);
+    spill::<0>(w, msg0);
     let mut e0 = _mm_add_epi32(e_in, msg0);
     let mut e1 = abcd;
     abcd = _mm_sha1rnds4_epu32(abcd, e0, 0);
 
-    spill!(wp, 4, msg1);
+    spill::<4>(w, msg1);
     e1 = _mm_sha1nexte_epu32(e1, msg1);
     e0 = abcd;
     abcd = _mm_sha1rnds4_epu32(abcd, e1, 0);
     msg0 = _mm_sha1msg1_epu32(msg0, msg1);
 
-    spill!(wp, 8, msg2);
+    spill::<8>(w, msg2);
     e0 = _mm_sha1nexte_epu32(e0, msg2);
     e1 = abcd;
     abcd = _mm_sha1rnds4_epu32(abcd, e0, 0);
     msg1 = _mm_sha1msg1_epu32(msg1, msg2);
     msg0 = _mm_xor_si128(msg0, msg2);
 
-    spill!(wp, 12, msg3);
+    spill::<12>(w, msg3);
     e1 = _mm_sha1nexte_epu32(e1, msg3);
     e0 = abcd;
     msg0 = _mm_sha1msg2_epu32(msg0, msg3);
@@ -103,36 +137,36 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
 
     // Steady state. The four message registers take turns, and so do the two
     // working words.
-    group!(wp, 16, 0, abcd, e0, e1, msg0, msg1, msg2, msg3);
-    group!(wp, 20, 1, abcd, e1, e0, msg1, msg2, msg3, msg0);
-    group!(wp, 24, 1, abcd, e0, e1, msg2, msg3, msg0, msg1);
-    group!(wp, 28, 1, abcd, e1, e0, msg3, msg0, msg1, msg2);
-    group!(wp, 32, 1, abcd, e0, e1, msg0, msg1, msg2, msg3);
-    group!(wp, 36, 1, abcd, e1, e0, msg1, msg2, msg3, msg0);
-    group!(wp, 40, 2, abcd, e0, e1, msg2, msg3, msg0, msg1);
-    group!(wp, 44, 2, abcd, e1, e0, msg3, msg0, msg1, msg2);
-    group!(wp, 48, 2, abcd, e0, e1, msg0, msg1, msg2, msg3);
-    group!(wp, 52, 2, abcd, e1, e0, msg1, msg2, msg3, msg0);
-    group!(wp, 56, 2, abcd, e0, e1, msg2, msg3, msg0, msg1);
-    group!(wp, 60, 3, abcd, e1, e0, msg3, msg0, msg1, msg2);
-    group!(wp, 64, 3, abcd, e0, e1, msg0, msg1, msg2, msg3);
+    group!(w, 16, 0, abcd, e0, e1, msg0, msg1, msg2, msg3);
+    group!(w, 20, 1, abcd, e1, e0, msg1, msg2, msg3, msg0);
+    group!(w, 24, 1, abcd, e0, e1, msg2, msg3, msg0, msg1);
+    group!(w, 28, 1, abcd, e1, e0, msg3, msg0, msg1, msg2);
+    group!(w, 32, 1, abcd, e0, e1, msg0, msg1, msg2, msg3);
+    group!(w, 36, 1, abcd, e1, e0, msg1, msg2, msg3, msg0);
+    group!(w, 40, 2, abcd, e0, e1, msg2, msg3, msg0, msg1);
+    group!(w, 44, 2, abcd, e1, e0, msg3, msg0, msg1, msg2);
+    group!(w, 48, 2, abcd, e0, e1, msg0, msg1, msg2, msg3);
+    group!(w, 52, 2, abcd, e1, e0, msg1, msg2, msg3, msg0);
+    group!(w, 56, 2, abcd, e0, e1, msg2, msg3, msg0, msg1);
+    group!(w, 60, 3, abcd, e1, e0, msg3, msg0, msg1, msg2);
+    group!(w, 64, 3, abcd, e0, e1, msg0, msg1, msg2, msg3);
 
     // The last words are already in hand, so the expansion stops one step at
     // a time.
-    spill!(wp, 68, msg1);
+    spill::<68>(w, msg1);
     e1 = _mm_sha1nexte_epu32(e1, msg1);
     e0 = abcd;
     msg2 = _mm_sha1msg2_epu32(msg2, msg1);
     abcd = _mm_sha1rnds4_epu32(abcd, e1, 3);
     msg3 = _mm_xor_si128(msg3, msg1);
 
-    spill!(wp, 72, msg2);
+    spill::<72>(w, msg2);
     e0 = _mm_sha1nexte_epu32(e0, msg2);
     e1 = abcd;
     msg3 = _mm_sha1msg2_epu32(msg3, msg2);
     abcd = _mm_sha1rnds4_epu32(abcd, e0, 3);
 
-    spill!(wp, 76, msg3);
+    spill::<76>(w, msg3);
     e1 = _mm_sha1nexte_epu32(e1, msg3);
     e0 = abcd;
     abcd = _mm_sha1rnds4_epu32(abcd, e1, 3);
@@ -141,6 +175,6 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     e0 = _mm_sha1nexte_epu32(e0, e_in);
     abcd = _mm_add_epi32(abcd, abcd_in);
 
-    _mm_storeu_si128(state.as_mut_ptr().cast(), _mm_shuffle_epi32(abcd, REVERSE));
+    store_abcd(state, abcd);
     state[4] = _mm_extract_epi32(e0, 3) as u32;
 }

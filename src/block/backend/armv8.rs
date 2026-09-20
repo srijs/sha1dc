@@ -17,12 +17,57 @@ use core::arch::aarch64::*;
 
 use crate::block::rounds::K;
 
-/// Compresses one block, spilling the message schedule into `w`.
+/// The four schedule words starting at `I`.
+///
+/// `I` is a const parameter, so a spill past the end of the schedule is a
+/// compile error at the call site rather than a promise in a comment.
+#[inline]
 #[target_feature(enable = "sha2")]
-#[allow(unsafe_op_in_unsafe_fn)]
-#[allow(clippy::too_many_lines)]
-pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut [u32; 80]) {
-    let mut abcd = vld1q_u32(state.as_ptr());
+fn spill<const I: usize>(w: &mut [u32; 80], v: uint32x4_t) {
+    const { assert!(I + 4 <= 80, "the spill runs past the schedule") }
+    // SAFETY: the const assert above proves `w[I..I + 4]` is in bounds,
+    // which is the whole of what this writes.
+    unsafe { vst1q_u32(w.as_mut_ptr().add(I), v) }
+}
+
+/// The four message words starting at byte `I`, in native order.
+#[inline]
+#[target_feature(enable = "sha2")]
+fn msg<const I: usize>(block: &[u8; 64]) -> uint32x4_t {
+    const { assert!(I + 16 <= 64, "the load runs past the block") }
+    // SAFETY: the const assert above proves `block[I..I + 16]` is in bounds,
+    // which is the whole of what this reads.
+    let bytes = unsafe { vld1q_u8(block.as_ptr().add(I)) };
+    vreinterpretq_u32_u8(vrev32q_u8(bytes))
+}
+
+/// The `abcd` half of the state. The fifth word is carried on its own.
+#[inline]
+#[target_feature(enable = "sha2")]
+fn load_abcd(state: &[u32; 5]) -> uint32x4_t {
+    // SAFETY: `vld1q_u32` reads four words, and `state` has five.
+    unsafe { vld1q_u32(state.as_ptr()) }
+}
+
+/// Writes `abcd` back, leaving the fifth word alone.
+#[inline]
+#[target_feature(enable = "sha2")]
+fn store_abcd(state: &mut [u32; 5], v: uint32x4_t) {
+    // SAFETY: `vst1q_u32` writes four words, and `state` has five.
+    unsafe { vst1q_u32(state.as_mut_ptr(), v) }
+}
+
+/// Compresses one block, spilling the message schedule into `w`.
+///
+/// Requires `sha2`, so a caller that cannot prove the feature needs an
+/// `unsafe` block.
+#[target_feature(enable = "sha2")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the block compression is one unrolled body"
+)]
+pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut [u32; 80]) {
+    let mut abcd = load_abcd(state);
     let mut e0 = state[4];
     let abcd_in = abcd;
     let e_in = e0;
@@ -32,23 +77,20 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     let k2 = vdupq_n_u32(K[2]);
     let k3 = vdupq_n_u32(K[3]);
 
-    let wp = w.as_mut_ptr();
-    let data = block.as_ptr();
-
     // The block, big-endian, one group of four words at a time.
-    let mut msg0 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(data)));
-    let mut msg1 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(data.add(16))));
-    let mut msg2 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(data.add(32))));
-    let mut msg3 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(data.add(48))));
+    let mut msg0 = msg::<0>(block);
+    let mut msg1 = msg::<16>(block);
+    let mut msg2 = msg::<32>(block);
+    let mut msg3 = msg::<48>(block);
 
     let mut e1;
     let mut tmp0;
     let mut tmp1;
 
-    vst1q_u32(wp, msg0);
-    vst1q_u32(wp.add(4), msg1);
-    vst1q_u32(wp.add(8), msg2);
-    vst1q_u32(wp.add(12), msg3);
+    spill::<0>(w, msg0);
+    spill::<4>(w, msg1);
+    spill::<8>(w, msg2);
+    spill::<12>(w, msg3);
 
     tmp0 = vaddq_u32(msg0, k0);
     tmp1 = vaddq_u32(msg1, k0);
@@ -64,7 +106,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1cq_u32(abcd, e1, tmp1);
     tmp1 = vaddq_u32(msg3, k0);
     msg0 = vsha1su1q_u32(msg0, msg3);
-    vst1q_u32(wp.add(16), msg0);
+    spill::<16>(w, msg0);
     msg1 = vsha1su0q_u32(msg1, msg2, msg3);
 
     // Rounds 8-11
@@ -72,7 +114,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1cq_u32(abcd, e0, tmp0);
     tmp0 = vaddq_u32(msg0, k0);
     msg1 = vsha1su1q_u32(msg1, msg0);
-    vst1q_u32(wp.add(20), msg1);
+    spill::<20>(w, msg1);
     msg2 = vsha1su0q_u32(msg2, msg3, msg0);
 
     // Rounds 12-15
@@ -80,7 +122,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1cq_u32(abcd, e1, tmp1);
     tmp1 = vaddq_u32(msg1, k1);
     msg2 = vsha1su1q_u32(msg2, msg1);
-    vst1q_u32(wp.add(24), msg2);
+    spill::<24>(w, msg2);
     msg3 = vsha1su0q_u32(msg3, msg0, msg1);
 
     // Rounds 16-19
@@ -88,7 +130,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1cq_u32(abcd, e0, tmp0);
     tmp0 = vaddq_u32(msg2, k1);
     msg3 = vsha1su1q_u32(msg3, msg2);
-    vst1q_u32(wp.add(28), msg3);
+    spill::<28>(w, msg3);
     msg0 = vsha1su0q_u32(msg0, msg1, msg2);
 
     // Rounds 20-23
@@ -96,7 +138,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1pq_u32(abcd, e1, tmp1);
     tmp1 = vaddq_u32(msg3, k1);
     msg0 = vsha1su1q_u32(msg0, msg3);
-    vst1q_u32(wp.add(32), msg0);
+    spill::<32>(w, msg0);
     msg1 = vsha1su0q_u32(msg1, msg2, msg3);
 
     // Rounds 24-27
@@ -104,7 +146,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1pq_u32(abcd, e0, tmp0);
     tmp0 = vaddq_u32(msg0, k1);
     msg1 = vsha1su1q_u32(msg1, msg0);
-    vst1q_u32(wp.add(36), msg1);
+    spill::<36>(w, msg1);
     msg2 = vsha1su0q_u32(msg2, msg3, msg0);
 
     // Rounds 28-31
@@ -112,7 +154,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1pq_u32(abcd, e1, tmp1);
     tmp1 = vaddq_u32(msg1, k1);
     msg2 = vsha1su1q_u32(msg2, msg1);
-    vst1q_u32(wp.add(40), msg2);
+    spill::<40>(w, msg2);
     msg3 = vsha1su0q_u32(msg3, msg0, msg1);
 
     // Rounds 32-35
@@ -120,7 +162,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1pq_u32(abcd, e0, tmp0);
     tmp0 = vaddq_u32(msg2, k2);
     msg3 = vsha1su1q_u32(msg3, msg2);
-    vst1q_u32(wp.add(44), msg3);
+    spill::<44>(w, msg3);
     msg0 = vsha1su0q_u32(msg0, msg1, msg2);
 
     // Rounds 36-39
@@ -128,7 +170,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1pq_u32(abcd, e1, tmp1);
     tmp1 = vaddq_u32(msg3, k2);
     msg0 = vsha1su1q_u32(msg0, msg3);
-    vst1q_u32(wp.add(48), msg0);
+    spill::<48>(w, msg0);
     msg1 = vsha1su0q_u32(msg1, msg2, msg3);
 
     // Rounds 40-43
@@ -136,7 +178,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1mq_u32(abcd, e0, tmp0);
     tmp0 = vaddq_u32(msg0, k2);
     msg1 = vsha1su1q_u32(msg1, msg0);
-    vst1q_u32(wp.add(52), msg1);
+    spill::<52>(w, msg1);
     msg2 = vsha1su0q_u32(msg2, msg3, msg0);
 
     // Rounds 44-47
@@ -144,7 +186,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1mq_u32(abcd, e1, tmp1);
     tmp1 = vaddq_u32(msg1, k2);
     msg2 = vsha1su1q_u32(msg2, msg1);
-    vst1q_u32(wp.add(56), msg2);
+    spill::<56>(w, msg2);
     msg3 = vsha1su0q_u32(msg3, msg0, msg1);
 
     // Rounds 48-51
@@ -152,7 +194,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1mq_u32(abcd, e0, tmp0);
     tmp0 = vaddq_u32(msg2, k2);
     msg3 = vsha1su1q_u32(msg3, msg2);
-    vst1q_u32(wp.add(60), msg3);
+    spill::<60>(w, msg3);
     msg0 = vsha1su0q_u32(msg0, msg1, msg2);
 
     // Rounds 52-55
@@ -160,7 +202,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1mq_u32(abcd, e1, tmp1);
     tmp1 = vaddq_u32(msg3, k3);
     msg0 = vsha1su1q_u32(msg0, msg3);
-    vst1q_u32(wp.add(64), msg0);
+    spill::<64>(w, msg0);
     msg1 = vsha1su0q_u32(msg1, msg2, msg3);
 
     // Rounds 56-59
@@ -168,7 +210,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1mq_u32(abcd, e0, tmp0);
     tmp0 = vaddq_u32(msg0, k3);
     msg1 = vsha1su1q_u32(msg1, msg0);
-    vst1q_u32(wp.add(68), msg1);
+    spill::<68>(w, msg1);
     msg2 = vsha1su0q_u32(msg2, msg3, msg0);
 
     // Rounds 60-63
@@ -176,7 +218,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1pq_u32(abcd, e1, tmp1);
     tmp1 = vaddq_u32(msg1, k3);
     msg2 = vsha1su1q_u32(msg2, msg1);
-    vst1q_u32(wp.add(72), msg2);
+    spill::<72>(w, msg2);
     msg3 = vsha1su0q_u32(msg3, msg0, msg1);
 
     // Rounds 64-67
@@ -184,7 +226,7 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vsha1pq_u32(abcd, e0, tmp0);
     tmp0 = vaddq_u32(msg2, k3);
     msg3 = vsha1su1q_u32(msg3, msg2);
-    vst1q_u32(wp.add(76), msg3);
+    spill::<76>(w, msg3);
 
     // Rounds 68-71
     e0 = vsha1h_u32(vgetq_lane_u32(abcd, 0));
@@ -202,6 +244,6 @@ pub(crate) unsafe fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &
     abcd = vaddq_u32(abcd_in, abcd);
     e0 = e0.wrapping_add(e_in);
 
-    vst1q_u32(state.as_mut_ptr(), abcd);
+    store_abcd(state, abcd);
     state[4] = e0;
 }

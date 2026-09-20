@@ -20,15 +20,11 @@ pub fn emit(plan: &Plan) -> String {
     let mut out = String::new();
 
     let preamble = r#"
-/// # Safety
+/// The checks that run on every block. Requires `neon`.
 ///
-/// Requires `neon`. Every load stays in `w`. The highest index read is {HIGH}.
+/// The highest index read is {HIGH}, and every load proves its own bound.
 #[target_feature(enable = "neon")]
-#[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn prefix(w: &[u32; 80]) -> u32 {
-    use core::arch::aarch64::*;
-
-    let p = w.as_ptr();
+fn prefix(w: &[u32; 80]) -> u32 {
     let mut acc0 = vdupq_n_u32(0);
     let mut acc1 = vdupq_n_u32(0);
 "#;
@@ -40,12 +36,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
         let bits: Vec<&str> = g.iter().map(|m| m.1.as_str()).collect();
 
         out.push_str("\n    {\n");
-        let _ = writeln!(out, "        let near = vld1q_u32(p.add({base}));");
-        let _ = writeln!(
-            out,
-            "        let far = vld1q_u32(p.add({}));",
-            base + f.offset
-        );
+        let _ = writeln!(out, "        let near = load::<{base}>(w);");
+        let _ = writeln!(out, "        let far = load::<{}>(w);", base + f.offset);
         let (shift, bit) = align(f);
         // `vshrq_n_u32` rejects a zero shift, and no shift is needed when the
         // bits are already aligned.
@@ -76,7 +68,7 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
         }
         let _ = writeln!(
             out,
-            "        let bits = vld1q_u32([{}].as_ptr());",
+            "        let bits = splat([{}]);",
             lanes(&bits, "        ", 4)
         );
         let _ = write!(
