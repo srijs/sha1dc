@@ -86,26 +86,37 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
         if n > 0 && n % 2 == 0 {
             out.push_str("\n    if mask == 0 {\n        return 0;\n    }\n");
         }
-        let guard = chunk.iter().fold(0, |a, (dv, _)| a | 1 << dv);
-        let _ = write!(out, "\n    if mask & ({}) != 0 {{\n", dv_expr(guard));
+        // The shared guard pays for itself only when it can skip several
+        // DVs at once. For a chunk of one it is the same test as the branch
+        // inside it, so that chunk is written flat.
+        let shared = chunk.len() > 1;
+        let pad = if shared { "        " } else { "    " };
+        if shared {
+            let guard = chunk.iter().fold(0, |a, (dv, _)| a | 1 << dv);
+            let _ = write!(out, "\n    if mask & ({}) != 0 {{\n", dv_expr(guard));
+        } else {
+            out.push('\n');
+        }
         for (dv, list) in chunk {
             let name = dv_expr(1 << dv);
             if list.len() == 1 {
                 let _ = write!(
                     out,
-                    "        if mask & {name} != 0 && {} {{\n            mask &= !{name};\n        }}\n",
+                    "{pad}if mask & {name} != 0 && {} {{\n{pad}    mask &= !{name};\n{pad}}}\n",
                     fails(list[0])
                 );
             } else {
                 let any: Vec<String> = list.iter().map(|c| fails(c)).collect();
                 let _ = write!(
                     out,
-                    "        if mask & {name} != 0\n            && ({})\n        {{\n            mask &= !{name};\n        }}\n",
-                    any.join("\n                || ")
+                    "{pad}if mask & {name} != 0\n{pad}    && ({})\n{pad}{{\n{pad}    mask &= !{name};\n{pad}}}\n",
+                    any.join(&format!("\n{pad}        || "))
                 );
             }
         }
-        out.push_str("    }\n");
+        if shared {
+            out.push_str("    }\n");
+        }
     }
 
     out.push_str("\n    mask\n}\n");

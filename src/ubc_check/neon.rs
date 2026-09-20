@@ -26,7 +26,7 @@ pub(super) unsafe fn check(w: &[u32; 80]) -> u32 {
 
 /// # Safety
 ///
-/// Requires `neon`. Every load stays in `w`. The highest index read is 64.
+/// Requires `neon`. Every load stays in `w`. The highest index read is 56.
 #[target_feature(enable = "neon")]
 #[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn prefix(w: &[u32; 80]) -> u32 {
@@ -54,19 +54,11 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = vld1q_u32(p.add(35));
-        let far = vld1q_u32(p.add(39));
-        let x = veorq_u32(near, vshrq_n_u32(far, 25));
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
-        let bits = vld1q_u32(
-            [
-                DV_I_45_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT,
-                DV_I_46_0_BIT | DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT,
-                DV_I_47_0_BIT | DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT,
-                DV_I_48_0_BIT | DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT,
-            ]
-            .as_ptr(),
-        );
+        let near = vld1q_u32(p.add(36));
+        let far = vld1q_u32(p.add(37));
+        let x = veorq_u32(near, vshrq_n_u32(far, 5));
+        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 0)), vdupq_n_u32(0));
+        let bits = vld1q_u32([DV_II_49_2_BIT, DV_II_50_2_BIT, DV_II_51_2_BIT, 0].as_ptr());
         acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
     }
 
@@ -81,40 +73,6 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
                 DV_I_46_2_BIT | DV_I_50_2_BIT | DV_II_49_2_BIT,
                 DV_I_47_2_BIT | DV_I_51_2_BIT | DV_II_50_2_BIT,
                 DV_I_48_2_BIT | DV_II_46_2_BIT | DV_II_51_2_BIT,
-            ]
-            .as_ptr(),
-        );
-        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
-    }
-
-    {
-        let near = vld1q_u32(p.add(37));
-        let far = vld1q_u32(p.add(40));
-        let x = veorq_u32(near, vshrq_n_u32(far, 25));
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
-        let bits = vld1q_u32(
-            [
-                DV_I_43_0_BIT | DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT,
-                DV_I_44_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
-                DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_49_0_BIT | DV_II_48_0_BIT | DV_II_55_0_BIT,
-                DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT,
-            ]
-            .as_ptr(),
-        );
-        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
-    }
-
-    {
-        let near = vld1q_u32(p.add(39));
-        let far = vld1q_u32(p.add(40));
-        let x = veorq_u32(near, vshrq_n_u32(far, 25));
-        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 4)), vdupq_n_u32(0));
-        let bits = vld1q_u32(
-            [
-                DV_I_43_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT,
-                DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
-                DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT,
-                DV_I_44_0_BIT | DV_I_46_0_BIT | DV_II_56_0_BIT,
             ]
             .as_ptr(),
         );
@@ -139,6 +97,45 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
+        let near = vld1q_u32(p.add(39));
+        let far = vld1q_u32(p.add(40));
+        let x = veorq_u32(near, vshrq_n_u32(far, 25));
+        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 4)), vdupq_n_u32(0));
+        let bits = vld1q_u32(
+            [
+                DV_I_43_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT,
+                DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
+                DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT,
+                DV_I_44_0_BIT | DV_I_46_0_BIT | DV_II_56_0_BIT,
+            ]
+            .as_ptr(),
+        );
+        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
+    }
+
+    {
+        let near = vld1q_u32(p.add(38));
+        let far = vld1q_u32(p.add(41));
+        let x = veorq_u32(near, vshrq_n_u32(far, 25));
+        let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
+        let bits = vld1q_u32(
+            [
+                DV_I_44_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
+                DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_49_0_BIT | DV_II_48_0_BIT | DV_II_55_0_BIT,
+                DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT,
+                DV_I_43_0_BIT
+                    | DV_I_45_0_BIT
+                    | DV_I_47_0_BIT
+                    | DV_I_51_0_BIT
+                    | DV_II_45_0_BIT
+                    | DV_II_50_0_BIT,
+            ]
+            .as_ptr(),
+        );
+        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
+    }
+
+    {
         let near = vld1q_u32(p.add(40));
         let far = vld1q_u32(p.add(41));
         let x = veorq_u32(near, far);
@@ -153,7 +150,12 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
                     | DV_II_56_0_BIT,
                 DV_I_45_0_BIT | DV_I_48_0_BIT | DV_I_49_0_BIT | DV_II_47_0_BIT | DV_II_48_0_BIT,
                 DV_I_46_0_BIT | DV_I_49_0_BIT | DV_I_50_0_BIT | DV_II_48_0_BIT | DV_II_49_0_BIT,
-                0,
+                DV_I_47_0_BIT
+                    | DV_I_50_0_BIT
+                    | DV_I_51_0_BIT
+                    | DV_II_45_0_BIT
+                    | DV_II_49_0_BIT
+                    | DV_II_50_0_BIT,
             ]
             .as_ptr(),
         );
@@ -161,50 +163,13 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = vld1q_u32(p.add(43));
-        let far = vld1q_u32(p.add(44));
-        let x = veorq_u32(near, far);
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 29));
-        let bits = vld1q_u32(
-            [
-                DV_I_47_0_BIT
-                    | DV_I_50_0_BIT
-                    | DV_I_51_0_BIT
-                    | DV_II_45_0_BIT
-                    | DV_II_49_0_BIT
-                    | DV_II_50_0_BIT,
-                DV_I_48_0_BIT
-                    | DV_I_51_0_BIT
-                    | DV_I_52_0_BIT
-                    | DV_II_45_0_BIT
-                    | DV_II_46_0_BIT
-                    | DV_II_50_0_BIT
-                    | DV_II_51_0_BIT,
-                DV_I_49_0_BIT
-                    | DV_I_52_0_BIT
-                    | DV_II_46_0_BIT
-                    | DV_II_47_0_BIT
-                    | DV_II_51_0_BIT
-                    | DV_II_52_0_BIT,
-                DV_I_43_0_BIT
-                    | DV_I_50_0_BIT
-                    | DV_II_47_0_BIT
-                    | DV_II_48_0_BIT
-                    | DV_II_52_0_BIT
-                    | DV_II_53_0_BIT,
-            ]
-            .as_ptr(),
-        );
-        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
-    }
-
-    {
-        let near = vld1q_u32(p.add(41));
-        let far = vld1q_u32(p.add(44));
+        let near = vld1q_u32(p.add(40));
+        let far = vld1q_u32(p.add(43));
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
         let bits = vld1q_u32(
             [
+                DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT,
                 DV_I_43_0_BIT
                     | DV_I_45_0_BIT
                     | DV_I_47_0_BIT
@@ -223,29 +188,6 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
                     | DV_I_49_0_BIT
                     | DV_II_47_0_BIT
                     | DV_II_52_0_BIT,
-                DV_I_44_0_BIT
-                    | DV_I_46_0_BIT
-                    | DV_I_48_0_BIT
-                    | DV_I_50_0_BIT
-                    | DV_II_48_0_BIT
-                    | DV_II_53_0_BIT,
-            ]
-            .as_ptr(),
-        );
-        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
-    }
-
-    {
-        let near = vld1q_u32(p.add(43));
-        let far = vld1q_u32(p.add(44));
-        let x = veorq_u32(near, vshrq_n_u32(far, 25));
-        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 4)), vdupq_n_u32(0));
-        let bits = vld1q_u32(
-            [
-                DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_47_0_BIT,
-                DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_48_0_BIT,
-                DV_I_45_0_BIT | DV_I_47_0_BIT | DV_I_49_0_BIT,
-                DV_I_46_0_BIT | DV_I_48_0_BIT | DV_I_50_0_BIT,
             ]
             .as_ptr(),
         );
@@ -270,6 +212,61 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
+        let near = vld1q_u32(p.add(44));
+        let far = vld1q_u32(p.add(45));
+        let x = veorq_u32(near, far);
+        let hit = vtstq_u32(x, vdupq_n_u32(1 << 29));
+        let bits = vld1q_u32(
+            [
+                DV_I_48_0_BIT
+                    | DV_I_51_0_BIT
+                    | DV_I_52_0_BIT
+                    | DV_II_45_0_BIT
+                    | DV_II_46_0_BIT
+                    | DV_II_50_0_BIT
+                    | DV_II_51_0_BIT,
+                DV_I_49_0_BIT
+                    | DV_I_52_0_BIT
+                    | DV_II_46_0_BIT
+                    | DV_II_47_0_BIT
+                    | DV_II_51_0_BIT
+                    | DV_II_52_0_BIT,
+                DV_I_43_0_BIT
+                    | DV_I_50_0_BIT
+                    | DV_II_47_0_BIT
+                    | DV_II_48_0_BIT
+                    | DV_II_52_0_BIT
+                    | DV_II_53_0_BIT,
+                DV_I_44_0_BIT
+                    | DV_I_51_0_BIT
+                    | DV_II_48_0_BIT
+                    | DV_II_49_0_BIT
+                    | DV_II_53_0_BIT
+                    | DV_II_54_0_BIT,
+            ]
+            .as_ptr(),
+        );
+        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
+    }
+
+    {
+        let near = vld1q_u32(p.add(44));
+        let far = vld1q_u32(p.add(45));
+        let x = veorq_u32(near, vshrq_n_u32(far, 5));
+        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 1)), vdupq_n_u32(0));
+        let bits = vld1q_u32(
+            [
+                DV_I_51_2_BIT | DV_II_49_2_BIT,
+                DV_II_50_2_BIT,
+                DV_II_51_2_BIT,
+                DV_II_46_2_BIT,
+            ]
+            .as_ptr(),
+        );
+        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
+    }
+
+    {
         let near = vld1q_u32(p.add(45));
         let far = vld1q_u32(p.add(46));
         let x = veorq_u32(vshrq_n_u32(near, 5), far);
@@ -287,44 +284,18 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = vld1q_u32(p.add(47));
-        let far = vld1q_u32(p.add(48));
-        let x = veorq_u32(near, far);
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 29));
-        let bits = vld1q_u32(
-            [
-                DV_I_44_0_BIT
-                    | DV_I_51_0_BIT
-                    | DV_II_48_0_BIT
-                    | DV_II_49_0_BIT
-                    | DV_II_53_0_BIT
-                    | DV_II_54_0_BIT,
-                DV_I_45_0_BIT
-                    | DV_I_52_0_BIT
-                    | DV_II_49_0_BIT
-                    | DV_II_50_0_BIT
-                    | DV_II_54_0_BIT
-                    | DV_II_55_0_BIT,
-                DV_I_46_0_BIT
-                    | DV_II_45_0_BIT
-                    | DV_II_50_0_BIT
-                    | DV_II_51_0_BIT
-                    | DV_II_55_0_BIT
-                    | DV_II_56_0_BIT,
-                DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_51_0_BIT | DV_II_52_0_BIT | DV_II_56_0_BIT,
-            ]
-            .as_ptr(),
-        );
-        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
-    }
-
-    {
-        let near = vld1q_u32(p.add(45));
-        let far = vld1q_u32(p.add(48));
+        let near = vld1q_u32(p.add(44));
+        let far = vld1q_u32(p.add(47));
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
         let bits = vld1q_u32(
             [
+                DV_I_44_0_BIT
+                    | DV_I_46_0_BIT
+                    | DV_I_48_0_BIT
+                    | DV_I_50_0_BIT
+                    | DV_II_48_0_BIT
+                    | DV_II_53_0_BIT,
                 DV_I_45_0_BIT
                     | DV_I_47_0_BIT
                     | DV_I_49_0_BIT
@@ -343,24 +314,6 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
                     | DV_II_45_0_BIT
                     | DV_II_51_0_BIT
                     | DV_II_56_0_BIT,
-                DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_52_0_BIT,
-            ]
-            .as_ptr(),
-        );
-        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
-    }
-
-    {
-        let near = vld1q_u32(p.add(47));
-        let far = vld1q_u32(p.add(48));
-        let x = veorq_u32(near, vshrq_n_u32(far, 25));
-        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 4)), vdupq_n_u32(0));
-        let bits = vld1q_u32(
-            [
-                DV_I_47_0_BIT | DV_I_49_0_BIT | DV_I_51_0_BIT,
-                DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT,
-                DV_I_49_0_BIT | DV_I_51_0_BIT | DV_II_45_0_BIT,
-                DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT,
             ]
             .as_ptr(),
         );
@@ -385,16 +338,26 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = vld1q_u32(p.add(51));
-        let far = vld1q_u32(p.add(52));
+        let near = vld1q_u32(p.add(48));
+        let far = vld1q_u32(p.add(49));
         let x = veorq_u32(near, far);
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 29));
         let bits = vld1q_u32(
             [
+                DV_I_45_0_BIT
+                    | DV_I_52_0_BIT
+                    | DV_II_49_0_BIT
+                    | DV_II_50_0_BIT
+                    | DV_II_54_0_BIT
+                    | DV_II_55_0_BIT,
+                DV_I_46_0_BIT
+                    | DV_II_45_0_BIT
+                    | DV_II_50_0_BIT
+                    | DV_II_51_0_BIT
+                    | DV_II_55_0_BIT
+                    | DV_II_56_0_BIT,
+                DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_51_0_BIT | DV_II_52_0_BIT | DV_II_56_0_BIT,
                 DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_52_0_BIT | DV_II_53_0_BIT,
-                DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT | DV_II_53_0_BIT | DV_II_54_0_BIT,
-                DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT | DV_II_54_0_BIT | DV_II_55_0_BIT,
-                DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT | DV_II_55_0_BIT | DV_II_56_0_BIT,
             ]
             .as_ptr(),
         );
@@ -402,16 +365,16 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = vld1q_u32(p.add(49));
-        let far = vld1q_u32(p.add(52));
+        let near = vld1q_u32(p.add(48));
+        let far = vld1q_u32(p.add(51));
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
         let bits = vld1q_u32(
             [
+                DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_52_0_BIT,
                 DV_I_49_0_BIT | DV_I_51_0_BIT | DV_II_45_0_BIT | DV_II_47_0_BIT | DV_II_53_0_BIT,
                 DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_48_0_BIT | DV_II_54_0_BIT,
                 DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_49_0_BIT | DV_II_55_0_BIT,
-                DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_50_0_BIT | DV_II_56_0_BIT,
             ]
             .as_ptr(),
         );
@@ -420,70 +383,19 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
 
     {
         let near = vld1q_u32(p.add(52));
-        let far = vld1q_u32(p.add(55));
-        let x = veorq_u32(near, far);
-        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 29)), vdupq_n_u32(0));
-        let bits = vld1q_u32(
-            [
-                DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_48_0_BIT,
-                DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_49_0_BIT,
-                DV_II_49_0_BIT | DV_II_50_0_BIT,
-                DV_II_50_0_BIT | DV_II_51_0_BIT,
-            ]
-            .as_ptr(),
-        );
-        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
-    }
-
-    {
-        let near = vld1q_u32(p.add(55));
-        let far = vld1q_u32(p.add(56));
+        let far = vld1q_u32(p.add(53));
         let x = veorq_u32(near, far);
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 29));
         let bits = vld1q_u32(
             [
+                DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT | DV_II_53_0_BIT | DV_II_54_0_BIT,
+                DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT | DV_II_54_0_BIT | DV_II_55_0_BIT,
+                DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT | DV_II_55_0_BIT | DV_II_56_0_BIT,
                 DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_51_0_BIT | DV_II_56_0_BIT,
-                DV_II_49_0_BIT | DV_II_52_0_BIT,
-                DV_II_50_0_BIT | DV_II_53_0_BIT,
-                DV_II_51_0_BIT | DV_II_54_0_BIT,
-            ]
-            .as_ptr(),
-        );
-        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
-    }
-
-    {
-        let near = vld1q_u32(p.add(53));
-        let far = vld1q_u32(p.add(56));
-        let x = veorq_u32(near, vshrq_n_u32(far, 25));
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
-        let bits = vld1q_u32(
-            [
-                DV_II_49_0_BIT | DV_II_51_0_BIT,
-                DV_II_50_0_BIT | DV_II_52_0_BIT,
-                DV_II_51_0_BIT | DV_II_53_0_BIT,
-                DV_II_52_0_BIT | DV_II_54_0_BIT,
             ]
             .as_ptr(),
         );
         acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
-    }
-
-    {
-        let near = vld1q_u32(p.add(60));
-        let far = vld1q_u32(p.add(61));
-        let x = veorq_u32(near, vshrq_n_u32(far, 5));
-        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 0)), vdupq_n_u32(0));
-        let bits = vld1q_u32(
-            [
-                DV_I_45_0_BIT | DV_II_45_0_BIT,
-                DV_I_46_0_BIT | DV_II_46_0_BIT,
-                DV_I_47_0_BIT | DV_II_47_0_BIT,
-                DV_I_48_0_BIT | DV_II_48_0_BIT,
-            ]
-            .as_ptr(),
-        );
-        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
     }
 
     let acc = vorrq_u32(acc0, acc1);
@@ -495,6 +407,24 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
 /// The checks the prefix leaves. `mask` is never zero here.
 #[inline(always)]
 fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
+    if mask & (DV_I_43_0_BIT | DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT)
+        != 0
+    {
+        mask &= (((w[37] >> 4) ^ (w[40] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_43_0_BIT | DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT);
+    }
+    if mask & (DV_I_46_0_BIT | DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT) != 0 {
+        mask &= (((w[36] >> 4) ^ (w[40] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_46_0_BIT | DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT);
+    }
+    if mask & (DV_I_47_0_BIT | DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT) != 0 {
+        mask &= (((w[37] >> 4) ^ (w[41] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_47_0_BIT | DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT);
+    }
+    if mask & (DV_I_48_0_BIT | DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT) != 0 {
+        mask &= (((w[38] >> 4) ^ (w[42] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_48_0_BIT | DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT);
+    }
     if mask & (DV_I_49_0_BIT | DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_51_0_BIT) != 0 {
         mask &= (((w[39] >> 4) ^ (w[43] >> 29)) & 1).wrapping_sub(1)
             | !(DV_I_49_0_BIT | DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_51_0_BIT);
@@ -515,9 +445,57 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
         mask &= (((w[44] >> 4) ^ (w[48] >> 29)) & 1).wrapping_sub(1)
             | !(DV_I_44_0_BIT | DV_II_48_0_BIT | DV_II_53_0_BIT | DV_II_56_0_BIT);
     }
+    if mask & (DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_50_0_BIT | DV_II_56_0_BIT) != 0 {
+        mask &= (((w[52] >> 4) ^ (w[55] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_50_0_BIT | DV_II_56_0_BIT);
+    }
+    if mask & (DV_I_45_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT) != 0 {
+        mask &= (((w[35] >> 4) ^ (w[39] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_45_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT);
+    }
     if mask & (DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_52_0_BIT) != 0 {
         mask &= (((w[40] >> 4) ^ (w[44] >> 29)) & 1).wrapping_sub(1)
             | !(DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_52_0_BIT);
+    }
+    if mask & (DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_47_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[41] >> 4) ^ (w[43] >> 4)) & 1)
+            | !(DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_47_0_BIT);
+    }
+    if mask & (DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_48_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[42] >> 4) ^ (w[44] >> 4)) & 1)
+            | !(DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_48_0_BIT);
+    }
+    if mask & (DV_I_45_0_BIT | DV_I_47_0_BIT | DV_I_49_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[43] >> 4) ^ (w[45] >> 4)) & 1)
+            | !(DV_I_45_0_BIT | DV_I_47_0_BIT | DV_I_49_0_BIT);
+    }
+    if mask & (DV_I_46_0_BIT | DV_I_48_0_BIT | DV_I_50_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[44] >> 4) ^ (w[46] >> 4)) & 1)
+            | !(DV_I_46_0_BIT | DV_I_48_0_BIT | DV_I_50_0_BIT);
+    }
+    if mask & (DV_I_47_0_BIT | DV_I_49_0_BIT | DV_I_51_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[45] >> 4) ^ (w[47] >> 4)) & 1)
+            | !(DV_I_47_0_BIT | DV_I_49_0_BIT | DV_I_51_0_BIT);
+    }
+    if mask & (DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[46] >> 4) ^ (w[48] >> 4)) & 1)
+            | !(DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT);
+    }
+    if mask & (DV_I_49_0_BIT | DV_I_51_0_BIT | DV_II_45_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[47] >> 4) ^ (w[49] >> 4)) & 1)
+            | !(DV_I_49_0_BIT | DV_I_51_0_BIT | DV_II_45_0_BIT);
+    }
+    if mask & (DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[48] >> 4) ^ (w[50] >> 4)) & 1)
+            | !(DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT);
+    }
+    if mask & (DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_48_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[52] >> 29) ^ (w[55] >> 29)) & 1)
+            | !(DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_48_0_BIT);
+    }
+    if mask & (DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_49_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[53] >> 29) ^ (w[56] >> 29)) & 1)
+            | !(DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_49_0_BIT);
     }
     if mask & (DV_I_51_0_BIT | DV_II_47_0_BIT) != 0 {
         mask &= (((w[35] >> 3) ^ (w[39] >> 28)) & 1).wrapping_sub(1)
@@ -527,17 +505,53 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
         mask &= (0u32).wrapping_sub(((w[36] >> 4) ^ (w[38] >> 4)) & 1)
             | !(DV_II_52_0_BIT | DV_II_54_0_BIT);
     }
-    if mask & (DV_I_51_2_BIT | DV_II_49_2_BIT) != 0 {
-        mask &= (0u32).wrapping_sub(((w[44] >> 1) ^ (w[45] >> 6)) & 1)
-            | !(DV_I_51_2_BIT | DV_II_49_2_BIT);
-    }
     if mask & (DV_I_50_2_BIT | DV_II_46_2_BIT) != 0 {
         mask &=
             (((w[48] >> 6) ^ (w[51] >> 1)) & 1).wrapping_sub(1) | !(DV_I_50_2_BIT | DV_II_46_2_BIT);
     }
+    if mask & (DV_II_49_0_BIT | DV_II_51_0_BIT) != 0 {
+        mask &= (((w[53] >> 4) ^ (w[56] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_II_49_0_BIT | DV_II_51_0_BIT);
+    }
+    if mask & (DV_II_50_0_BIT | DV_II_52_0_BIT) != 0 {
+        mask &= (((w[54] >> 4) ^ (w[57] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_II_50_0_BIT | DV_II_52_0_BIT);
+    }
+    if mask & (DV_II_49_0_BIT | DV_II_50_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[54] >> 29) ^ (w[57] >> 29)) & 1)
+            | !(DV_II_49_0_BIT | DV_II_50_0_BIT);
+    }
+    if mask & (DV_II_51_0_BIT | DV_II_53_0_BIT) != 0 {
+        mask &= (((w[55] >> 4) ^ (w[58] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_II_51_0_BIT | DV_II_53_0_BIT);
+    }
+    if mask & (DV_II_50_0_BIT | DV_II_51_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[55] >> 29) ^ (w[58] >> 29)) & 1)
+            | !(DV_II_50_0_BIT | DV_II_51_0_BIT);
+    }
+    if mask & (DV_II_52_0_BIT | DV_II_54_0_BIT) != 0 {
+        mask &= (((w[56] >> 4) ^ (w[59] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_II_52_0_BIT | DV_II_54_0_BIT);
+    }
+    if mask & (DV_II_51_0_BIT | DV_II_52_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[56] >> 29) ^ (w[59] >> 29)) & 1)
+            | !(DV_II_51_0_BIT | DV_II_52_0_BIT);
+    }
+    if mask & (DV_I_45_0_BIT | DV_II_45_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub((w[60] ^ (w[61] >> 5)) & 1) | !(DV_I_45_0_BIT | DV_II_45_0_BIT);
+    }
+    if mask & (DV_I_46_0_BIT | DV_II_46_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub((w[61] ^ (w[62] >> 5)) & 1) | !(DV_I_46_0_BIT | DV_II_46_0_BIT);
+    }
     if mask & (DV_I_46_2_BIT | DV_II_46_2_BIT) != 0 {
         mask &= (0u32).wrapping_sub(((w[61] >> 2) ^ (w[62] >> 7)) & 1)
             | !(DV_I_46_2_BIT | DV_II_46_2_BIT);
+    }
+    if mask & (DV_I_47_0_BIT | DV_II_47_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub((w[62] ^ (w[63] >> 5)) & 1) | !(DV_I_47_0_BIT | DV_II_47_0_BIT);
+    }
+    if mask & (DV_I_48_0_BIT | DV_II_48_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub((w[63] ^ (w[64] >> 5)) & 1) | !(DV_I_48_0_BIT | DV_II_48_0_BIT);
     }
     if mask & (DV_I_45_0_BIT | DV_II_45_0_BIT) != 0 {
         mask &= (0u32).wrapping_sub(((w[63] >> 1) ^ (w[64] >> 6)) & 1)
@@ -600,7 +614,7 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
         }
     }
 
-    if mask & (DV_I_51_2_BIT | DV_I_52_0_BIT | DV_II_46_2_BIT) != 0 {
+    if mask & (DV_I_51_2_BIT | DV_I_52_0_BIT | DV_II_48_0_BIT) != 0 {
         if mask & DV_I_51_2_BIT != 0
             && (((w[35] >> 5) ^ (w[39] >> 30)) & 1 != 0
                 || ((w[37] >> 1) ^ (w[37] >> 6)) & 1 != 0
@@ -611,8 +625,10 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
         if mask & DV_I_52_0_BIT != 0 && ((w[38] >> 4) ^ (w[39] >> 4)) & 1 == 0 {
             mask &= !DV_I_52_0_BIT;
         }
-        if mask & DV_II_46_2_BIT != 0 && ((w[47] >> 1) ^ (w[48] >> 6)) & 1 == 0 {
-            mask &= !DV_II_46_2_BIT;
+        if mask & DV_II_48_0_BIT != 0
+            && (((w[35] >> 30) ^ (w[36] >> 3)) & 1 == 0 || ((w[35] >> 30) ^ (w[40] >> 28)) & 1 == 0)
+        {
+            mask &= !DV_II_48_0_BIT;
         }
     }
 
@@ -620,38 +636,30 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
         return 0;
     }
 
-    if mask & (DV_II_48_0_BIT | DV_II_49_0_BIT | DV_II_49_2_BIT) != 0 {
-        if mask & DV_II_48_0_BIT != 0
-            && (((w[35] >> 30) ^ (w[36] >> 3)) & 1 == 0 || ((w[35] >> 30) ^ (w[40] >> 28)) & 1 == 0)
-        {
-            mask &= !DV_II_48_0_BIT;
-        }
+    if mask & (DV_II_49_0_BIT | DV_II_49_2_BIT | DV_II_50_0_BIT) != 0 {
         if mask & DV_II_49_0_BIT != 0
             && (((w[36] >> 30) ^ (w[37] >> 3)) & 1 == 0 || ((w[36] >> 30) ^ (w[41] >> 28)) & 1 == 0)
         {
             mask &= !DV_II_49_0_BIT;
         }
         if mask & DV_II_49_2_BIT != 0
-            && ((w[36] ^ (w[37] >> 5)) & 1 == 0
-                || (w[36] ^ (w[41] >> 30)) & 1 == 0
+            && ((w[36] ^ (w[41] >> 30)) & 1 == 0
                 || ((w[50] >> 1) ^ (w[51] >> 6)) & 1 == 0
                 || ((w[50] >> 1) ^ (w[53] >> 6)) & 1 == 0
                 || ((w[50] >> 1) ^ (w[54] >> 1)) & 1 == 0)
         {
             mask &= !DV_II_49_2_BIT;
         }
-    }
-
-    if mask & (DV_II_50_0_BIT | DV_II_50_2_BIT | DV_II_51_0_BIT) != 0 {
         if mask & DV_II_50_0_BIT != 0
             && (((w[37] >> 30) ^ (w[38] >> 3)) & 1 == 0 || ((w[37] >> 30) ^ (w[42] >> 28)) & 1 == 0)
         {
             mask &= !DV_II_50_0_BIT;
         }
+    }
+
+    if mask & (DV_II_50_2_BIT | DV_II_51_0_BIT | DV_II_51_2_BIT) != 0 {
         if mask & DV_II_50_2_BIT != 0
-            && ((w[37] ^ (w[38] >> 5)) & 1 == 0
-                || (w[37] ^ (w[42] >> 30)) & 1 == 0
-                || ((w[45] >> 1) ^ (w[46] >> 6)) & 1 == 0
+            && ((w[37] ^ (w[42] >> 30)) & 1 == 0
                 || ((w[51] >> 1) ^ (w[52] >> 6)) & 1 == 0
                 || ((w[51] >> 1) ^ (w[54] >> 6)) & 1 == 0
                 || ((w[51] >> 1) ^ (w[55] >> 1)) & 1 == 0)
@@ -663,23 +671,21 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
         {
             mask &= !DV_II_51_0_BIT;
         }
-    }
-
-    if mask == 0 {
-        return 0;
-    }
-
-    if mask & (DV_II_51_2_BIT | DV_II_52_0_BIT | DV_II_53_0_BIT) != 0 {
         if mask & DV_II_51_2_BIT != 0
-            && ((w[38] ^ (w[39] >> 5)) & 1 == 0
-                || (w[38] ^ (w[43] >> 30)) & 1 == 0
-                || ((w[46] >> 1) ^ (w[47] >> 6)) & 1 == 0
+            && ((w[38] ^ (w[43] >> 30)) & 1 == 0
                 || ((w[52] >> 1) ^ (w[53] >> 6)) & 1 == 0
                 || ((w[52] >> 1) ^ (w[55] >> 6)) & 1 == 0
                 || ((w[52] >> 1) ^ (w[56] >> 1)) & 1 == 0)
         {
             mask &= !DV_II_51_2_BIT;
         }
+    }
+
+    if mask == 0 {
+        return 0;
+    }
+
+    if mask & (DV_II_52_0_BIT | DV_II_53_0_BIT | DV_II_54_0_BIT) != 0 {
         if mask & DV_II_52_0_BIT != 0
             && (((w[39] >> 30) ^ (w[40] >> 3)) & 1 == 0
                 || ((w[39] >> 30) ^ (w[44] >> 28)) & 1 == 0
@@ -691,18 +697,21 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
         if mask & DV_II_53_0_BIT != 0
             && (((w[41] >> 3) ^ (w[45] >> 28)) & 1 != 0
                 || ((w[55] >> 4) ^ (w[57] >> 4)) & 1 == 0
+                || ((w[55] >> 4) ^ (w[57] >> 29)) & 1 != 0
                 || ((w[55] >> 4) ^ (w[61] >> 29)) & 1 == 0)
         {
             mask &= !DV_II_53_0_BIT;
         }
-    }
-
-    if mask & (DV_II_54_0_BIT | DV_II_55_0_BIT | DV_II_56_0_BIT) != 0 {
         if mask & DV_II_54_0_BIT != 0
-            && (((w[42] >> 3) ^ (w[46] >> 28)) & 1 != 0 || ((w[58] >> 4) ^ (w[62] >> 29)) & 1 != 0)
+            && (((w[42] >> 3) ^ (w[46] >> 28)) & 1 != 0
+                || ((w[56] >> 4) ^ (w[58] >> 29)) & 1 != 0
+                || ((w[58] >> 4) ^ (w[62] >> 29)) & 1 != 0)
         {
             mask &= !DV_II_54_0_BIT;
         }
+    }
+
+    if mask & (DV_II_55_0_BIT | DV_II_56_0_BIT) != 0 {
         if mask & DV_II_55_0_BIT != 0
             && (((w[43] >> 3) ^ (w[47] >> 28)) & 1 != 0
                 || ((w[57] >> 4) ^ (w[59] >> 29)) & 1 != 0

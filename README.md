@@ -38,16 +38,16 @@ report a detected attack as an error. The [documentation] covers both.
 
 These figures compare the crate against the [`sha1`] crate, which has no
 collision detection. The machines are an Apple M4 laptop, an EC2 c7i.xlarge
-and an EC2 c8g.xlarge. Each figure is the best of several runs.
+and an EC2 c8g.xlarge.
 
 | machine              | backend             | [`sha1`]  | `sha1dc`  | ratio |
 |----------------------|---------------------|-----------|-----------|-------|
-| Apple M4             | SHA-1 instructions  | 3011 MiB/s| 2425 MiB/s|   80% |
-| Apple M4             | scalar              | 1362 MiB/s|  889 MiB/s|   65% |
-| Xeon Platinum 8488C  | SHA-NI              | 1898 MiB/s| 1257 MiB/s|   66% |
-| Xeon Platinum 8488C  | scalar              |  814 MiB/s|  538 MiB/s|   66% |
-| Graviton4            | SHA-1 instructions  | 1626 MiB/s| 1113 MiB/s|   68% |
-| Graviton4            | scalar              |  701 MiB/s|  476 MiB/s|   68% |
+| Apple M4             | SHA-1 instructions  | 2977 MiB/s| 2296 MiB/s|   77% |
+| Apple M4             | scalar              | 1332 MiB/s|  917 MiB/s|   69% |
+| Xeon Platinum 8488C  | SHA-NI              | 1917 MiB/s| 1289 MiB/s|   67% |
+| Xeon Platinum 8488C  | scalar              |  826 MiB/s|  544 MiB/s|   66% |
+| Graviton4            | SHA-1 instructions  | 1616 MiB/s| 1251 MiB/s|   77% |
+| Graviton4            | scalar              |  697 MiB/s|  479 MiB/s|   69% |
 
 A scalar row builds the [`sha1`] crate with its own scalar backend, so that
 both columns use the same class of instructions.
