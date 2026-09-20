@@ -14,10 +14,9 @@ message blocks that a collision attack produces and reports them ([paper]).
 
 To implement filtering for known disturbance vectors, it follows a code
 generation approach. Each condition for an attack is a linear equation over two
-bits of the expanded message. A solver searches the space they span for a set
-of equations that suits vector execution, and then emits code for each
-instruction set. Currently supported are `sse2`, `avx2`, `neon` as well as a
-scalar baseline.
+bits of the expanded message. A solver searches the space they span for a set of
+equations that suits the target instruction set, and emits code for it. Current
+targets are `neon`, `sse2` and `avx2`, as well as a scalar baseline.
 
 Where available, the implementation also uses SHA-1 hardware instructions on
 `x86_64` and `aarch64`. Detection still does more work per block than plain

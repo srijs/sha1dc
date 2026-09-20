@@ -40,28 +40,44 @@ mod ubc;
 
 use std::path::PathBuf;
 
-/// How many vector groups the prefix may spend, costed at eight lanes.
+/// What each target solves for.
 ///
-/// Every group runs on every block, so this trades unconditional vector work
-/// against the guarded tail. Swept on a Xeon Platinum 8488C, in MiB/s:
+/// `width` is the lane count a group is costed against, and `groups` is how
+/// many groups the prefix may spend. A group runs on every block, so the
+/// budget trades unconditional work against the guarded tail.
 ///
-/// ```text
-/// 8     10     11     12     13     16     20     24     28
-/// 1278  1293   1301   1289   1287   1262   1223   1165   1114
-/// ```
-///
-/// 9 to 13 is a plateau. 11 is 0.6% above this value on that machine, but
-/// 0.6% below it on an Apple M-series, so the middle of the plateau wins.
-/// Past 16 the prefix does more work than the tail it removes.
-const PREFIX_GROUPS: usize = 10;
+/// Every target has its own optimum, measured on an Apple M-series and a Xeon
+/// Platinum 8488C. The scalar form has no lanes, so a group is one statement
+/// and it wants far fewer of them. The two four-lane forms share a plan
+/// because the lane count is all the solver sees.
+const TARGETS: &[Target] = &[
+    Target {
+        name: "scalar",
+        width: 1,
+        groups: 40,
+    },
+    Target {
+        name: "neon",
+        width: 4,
+        groups: 22,
+    },
+    Target {
+        name: "sse2",
+        width: 4,
+        groups: 22,
+    },
+    Target {
+        name: "avx2",
+        width: 8,
+        groups: 10,
+    },
+];
 
-/// The lane count the prefix is costed against.
-///
-/// Eight is AVX2. The four-lane forms cut the same families in half, so they
-/// do not need a plan of their own. The reverse is not true: a plan costed at
-/// four lanes fills only half of each AVX2 vector, and measures slower than
-/// the published basis on x86.
-const WIDTH: usize = 8;
+struct Target {
+    name: &'static str,
+    width: usize,
+    groups: usize,
+}
 
 /// Reads a tunable from the environment, for measuring.
 fn tunable(name: &str, fallback: usize) -> usize {
@@ -80,56 +96,59 @@ fn main() -> std::io::Result<()> {
         return Ok(());
     }
 
-    let plan = solve::solve(
-        tunable("SHA1DC_WIDTH", WIDTH),
-        tunable("SHA1DC_PREFIX_GROUPS", PREFIX_GROUPS),
-    );
-
     let out = match arg {
         Some(dir) => PathBuf::from(dir),
         None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/ubc_check"),
     };
-    std::fs::create_dir_all(out.join("prefix"))?;
+    std::fs::create_dir_all(&out)?;
 
-    for (name, contents) in [
-        ("prefix/scalar.rs", scalar::emit(&plan)),
-        ("prefix/neon.rs", neon::emit(&plan)),
-        ("prefix/sse2.rs", sse2::emit(&plan)),
-        ("prefix/avx2.rs", avx2::emit(&plan)),
-        ("tail.rs", tail::emit(&plan)),
-    ] {
-        let path = out.join(name);
-        std::fs::write(&path, contents)?;
+    for target in TARGETS {
+        let plan = solve::solve(
+            tunable(
+                &format!("SHA1DC_{}_WIDTH", target.name.to_uppercase()),
+                target.width,
+            ),
+            tunable(
+                &format!("SHA1DC_{}_GROUPS", target.name.to_uppercase()),
+                target.groups,
+            ),
+        );
+        let prefix = match target.name {
+            "scalar" => scalar::emit(&plan),
+            "neon" => neon::emit(&plan),
+            "sse2" => sse2::emit(&plan),
+            "avx2" => avx2::emit(&plan),
+            other => panic!("no emitter for {other}"),
+        };
+        let path = out.join(format!("{}.rs", target.name));
+        std::fs::write(
+            &path,
+            emit::module(target.name, &prefix, &tail::emit(&plan)),
+        )?;
         println!("wrote {}", path.display());
     }
     Ok(())
 }
 
-/// What each budget costs, so the choice of [`PREFIX_GROUPS`] can be measured
-/// rather than guessed.
+/// What each budget costs a target, so the plans can be measured rather than
+/// guessed.
 fn report() {
-    println!("groups  families  checks  g@8  g@4  tail  shared  per-DV");
-    let width = tunable("SHA1DC_WIDTH", WIDTH);
-    println!("(costed at {width} lanes)");
-    for n in [8, 10, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36] {
-        let plan = solve::solve(width, n);
-        let g8: usize = plan
-            .families
-            .iter()
-            .map(|f| f.members.len().div_ceil(8))
-            .sum();
-        let g4: usize = plan
-            .families
-            .iter()
-            .map(|f| f.members.len().div_ceil(4))
-            .sum();
-        let checks: usize = plan.families.iter().map(|f| f.members.len()).sum();
-        let shared = plan.tail.iter().filter(|c| c.dvs.count_ones() > 1).count();
+    for target in TARGETS {
         println!(
-            "{n:>6}  {:>8}  {checks:>6}  {g8:>3}  {g4:>3}  {:>4}  {shared:>6}  {:>6}",
-            plan.families.len(),
-            plan.tail.len(),
-            plan.tail.len() - shared
+            "\n{} — costed at {} lane(s), shipping {} groups",
+            target.name, target.width, target.groups
         );
+        println!("groups  families  checks  tail  shared  per-DV");
+        for n in [8, 10, 13, 16, 20, 22, 26, 30, 40, 55] {
+            let plan = solve::solve(target.width, n);
+            let checks: usize = plan.families.iter().map(|f| f.members.len()).sum();
+            let shared = plan.tail.iter().filter(|c| c.dvs.count_ones() > 1).count();
+            println!(
+                "{n:>6}  {:>8}  {checks:>6}  {:>4}  {shared:>6}  {:>6}",
+                plan.families.len(),
+                plan.tail.len(),
+                plan.tail.len() - shared
+            );
+        }
     }
 }

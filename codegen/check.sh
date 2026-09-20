@@ -10,11 +10,12 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 fresh=$(mktemp -d -t sha1dc-ubc.XXXXXX)
 trap 'rm -rf "$fresh"' EXIT
 
-env -u SHA1DC_PREFIX_GROUPS \
+env -u SHA1DC_SCALAR_GROUPS -u SHA1DC_NEON_GROUPS \
+    -u SHA1DC_SSE2_GROUPS -u SHA1DC_AVX2_GROUPS \
     cargo run --quiet --manifest-path "$root/codegen/Cargo.toml" -- "$fresh" > /dev/null
 
 stale=""
-for f in prefix/scalar prefix/neon prefix/sse2 prefix/avx2 tail; do
+for f in scalar neon sse2 avx2; do
     rustfmt --edition 2024 "$fresh/$f.rs"
     if ! diff -u "$root/src/ubc_check/$f.rs" "$fresh/$f.rs"; then
         stale="$stale $f.rs"

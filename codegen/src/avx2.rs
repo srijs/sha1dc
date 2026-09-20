@@ -10,13 +10,13 @@
 
 use std::fmt::Write as _;
 
-use crate::emit::{align, all_groups, header, highest_read, lanes};
+use crate::emit::{align, all_groups, highest_read, lanes};
 use crate::solve::Plan;
 
 const W: usize = 8;
 
 pub fn emit(plan: &Plan) -> String {
-    let mut out = header("The unconditional UBC checks, AVX2 form.");
+    let mut out = String::new();
 
     let preamble = r#"
 /// # Safety
@@ -24,7 +24,7 @@ pub fn emit(plan: &Plan) -> String {
 /// Requires `avx2`. Every load stays in `w`. The highest index read is {HIGH}.
 #[target_feature(enable = "avx2")]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub(crate) unsafe fn mask(w: &[u32; 80]) -> u32 {
+unsafe fn prefix(w: &[u32; 80]) -> u32 {
     #[cfg(target_arch = "x86")]
     use core::arch::x86::*;
     #[cfg(target_arch = "x86_64")]

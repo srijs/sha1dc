@@ -42,7 +42,7 @@ pub(crate) fn compress(ctx: &mut Inner, blocks: &[[u8; BLOCK_SIZE]]) {
         // Without the filter every attack is a candidate, which is what the
         // `no ubc check` benchmark measures.
         let candidates = if ctx.ubc_check {
-            crate::ubc_check::ubc_check(&ctx.m1)
+            crate::ubc_check::ubc_check(&ctx.m1, ctx.scalar_only)
         } else {
             !0
         };

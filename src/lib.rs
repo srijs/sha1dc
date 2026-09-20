@@ -186,6 +186,9 @@ struct Inner {
     buffer: [u8; BLOCK_SIZE],
     buffer_len: usize,
     backend: Backend,
+    /// Keeps every path scalar, including the UBC check, which the backend
+    /// alone does not cover.
+    scalar_only: bool,
 
     // What the detection needs. The names follow the C.
     safe_hash: bool,
@@ -218,6 +221,7 @@ impl Inner {
             } else {
                 Backend::new()
             },
+            scalar_only: builder.scalar_backend,
             safe_hash,
             ubc_check: builder.ubc_check,
             reduced_round_collision: builder.reduced_round_collisions,
@@ -486,11 +490,11 @@ impl Builder {
     }
 
     /// Sets the hasher to use the scalar implementation and not the CPU
-    /// SHA-1 instructions.
+    /// SHA-1 instructions, and the scalar form of the UBC check.
     ///
     /// **Not public API. Exempt from semver.** Tests and the benchmark use it
-    /// to run the scalar path on a machine that has the instructions. Without
-    /// it, that path runs only where the instructions are absent.
+    /// to run the scalar paths on a machine that has the instructions. Without
+    /// it, those paths run only where the instructions are absent.
     #[doc(hidden)]
     pub const fn internal_scalar_backend(mut self) -> Self {
         self.scalar_backend = true;

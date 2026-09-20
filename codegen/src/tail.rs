@@ -10,7 +10,7 @@
 
 use std::fmt::Write as _;
 
-use crate::emit::{dv_expr, header};
+use crate::emit::dv_expr;
 use crate::solve::{Cond, Plan};
 
 /// `w[i] >> n`, or `w[i]` when the shift is zero, which clippy rejects.
@@ -33,14 +33,13 @@ fn fails(c: &Cond) -> String {
 }
 
 pub fn emit(plan: &Plan) -> String {
-    let mut out = header("The UBC checks that the prefix leaves.");
+    let mut out = String::new();
 
     out.push_str(
         r#"
-/// Clears the DVs that the remaining conditions rule out. The prefix has
-/// already cleared what it covers, and `mask` is never zero here.
+/// The checks the prefix leaves. `mask` is never zero here.
 #[inline(always)]
-pub(crate) fn mask(w: &[u32; 80], mut mask: u32) -> u32 {
+fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
 "#,
     );
 

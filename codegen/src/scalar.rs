@@ -9,17 +9,17 @@
 
 use std::fmt::Write as _;
 
-use crate::emit::{align, dv_expr, header};
+use crate::emit::{align, dv_expr};
 use crate::solve::Plan;
 
 pub fn emit(plan: &Plan) -> String {
-    let mut out = header("The unconditional UBC checks, scalar reference form.");
+    let mut out = String::new();
 
     out.push_str(
         r#"
-#[allow(dead_code)]
+/// The checks that run on every block.
 #[inline(always)]
-pub(crate) fn mask(w: &[u32; 80]) -> u32 {
+fn prefix(w: &[u32; 80]) -> u32 {
     let mut mask: u32 = !0;
 "#,
     );

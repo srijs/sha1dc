@@ -11,13 +11,13 @@
 
 use std::fmt::Write as _;
 
-use crate::emit::{align, all_groups, header, highest_read, lanes};
+use crate::emit::{align, all_groups, highest_read, lanes};
 use crate::solve::Plan;
 
 const W: usize = 4;
 
 pub fn emit(plan: &Plan) -> String {
-    let mut out = header("The unconditional UBC checks, `aarch64` NEON form.");
+    let mut out = String::new();
 
     let preamble = r#"
 /// # Safety
@@ -25,7 +25,7 @@ pub fn emit(plan: &Plan) -> String {
 /// Requires `neon`. Every load stays in `w`. The highest index read is {HIGH}.
 #[target_feature(enable = "neon")]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub(crate) unsafe fn mask(w: &[u32; 80]) -> u32 {
+unsafe fn prefix(w: &[u32; 80]) -> u32 {
     use core::arch::aarch64::*;
 
     let p = w.as_ptr();

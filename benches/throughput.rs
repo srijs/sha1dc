@@ -5,10 +5,12 @@
 //! `sha1dc` row has a percentage. That row and the baseline both select the
 //! best backend for the machine, so you can compare them.
 //!
-//! To compare the scalar paths, run again with
+//! The `sha1dc (scalar)` row takes no hardware at all: neither the SHA-1
+//! instructions nor a vector form of the UBC check. To compare it against a
+//! like-for-like baseline, run again with
 //! `RUSTFLAGS='--cfg sha1_backend="soft"'`, which is the switch of the `sha1`
-//! crate, and read the `sha1dc (scalar)` row. In that run the percentage on
-//! the plain row has no meaning, because this crate still uses hardware.
+//! crate. In that run the percentage on the plain row has no meaning, because
+//! this crate still uses hardware.
 
 use std::hint::black_box;
 use std::time::{Duration, Instant};

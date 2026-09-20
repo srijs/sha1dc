@@ -27,12 +27,18 @@
 //! checks does not matter.
 //!
 //! For one DV the published checks are one basis of a linear space, not a
-//! fixed list. Any basis with the same span gives the same mask. `codegen/`
-//! uses that freedom: it picks the basis that fits vector lanes, then splits
-//! it in two. [`prefix`] runs on every block, four checks or eight at a time,
-//! and is most of the cost. [`tail`] runs the rest one at a time, behind
+//! fixed list. Any basis with the same span gives the same mask, so
+//! `codegen/` is free to pick a different one. It solves once per target,
+//! because each wants a different basis: a check costs one statement in
+//! [`scalar`] but a quarter of a load pair in [`neon`] and [`sse2`], and an
+//! eighth in [`avx2`]. Every target therefore gets its own module, holding
+//! its own whole check.
+//!
+//! Inside a module the checks are in two parts. The prefix runs on every
+//! block and is most of the cost. The tail runs the rest one at a time behind
 //! guards, because by then the mask is sparse and a guard that skips a check
-//! is worth more than the check costs. Both are generated.
+//! is worth more than the check costs. Where the split falls is what each
+//! target solves for.
 //!
 //! # Provenance
 //!
@@ -241,23 +247,81 @@ const fn build_dvs() -> [Info; 32] {
     }
     out
 }
-mod prefix;
-mod tail;
+mod scalar;
+
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+mod neon;
+
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    target_feature = "sse2"
+))]
+mod sse2;
+
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    target_feature = "sse2",
+    any(feature = "std", target_feature = "avx2")
+))]
+mod avx2;
+
+/// Whether this CPU has AVX2, which no target guarantees.
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    target_feature = "sse2",
+    any(feature = "std", target_feature = "avx2")
+))]
+#[inline(always)]
+fn has_avx2() -> bool {
+    #[cfg(feature = "std")]
+    {
+        std::arch::is_x86_feature_detected!("avx2")
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        cfg!(target_feature = "avx2")
+    }
+}
 
 /// Checks the unavoidable bitconditions of every listed DV against an expanded
 /// message block. Returns a mask. A set bit marks a DV that met all of its
 /// conditions and still needs the recompression check.
+///
+/// `scalar_only` keeps to [`scalar`] on a machine that has a vector unit.
+/// Tests and benchmarks use it to reach that path.
 #[inline]
-pub(crate) fn ubc_check(w: &[u32; 80]) -> u32 {
-    let mask = prefix::mask(w);
-
-    // Every check only clears bits, so once the mask is empty the answer is
-    // settled. The prefix alone empties it for most blocks.
-    if mask == 0 {
-        return 0;
+pub(crate) fn ubc_check(w: &[u32; 80], scalar_only: bool) -> u32 {
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    if !scalar_only {
+        // SAFETY: the cfg guarantees `neon`. All reads stay in `w`.
+        return unsafe { neon::check(w) };
     }
 
-    tail::mask(w, mask)
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "sse2"
+    ))]
+    if !scalar_only {
+        #[cfg(any(feature = "std", target_feature = "avx2"))]
+        if has_avx2() {
+            // SAFETY: just detected. All reads stay in `w`.
+            return unsafe { avx2::check(w) };
+        }
+        // SAFETY: the cfg guarantees `sse2`. All reads stay in `w`.
+        return unsafe { sse2::check(w) };
+    }
+
+    // On a target with neither there is nothing to turn off.
+    #[cfg(not(any(
+        all(target_arch = "aarch64", target_feature = "neon"),
+        all(
+            any(target_arch = "x86", target_arch = "x86_64"),
+            target_feature = "sse2"
+        )
+    )))]
+    let _ = scalar_only;
+
+    scalar::check(w)
 }
 
 #[cfg(test)]
@@ -283,17 +347,31 @@ mod tests {
         }
     }
 
-    /// The vectorized prefix must agree with the scalar form it came from. A
-    /// prefix that clears too few bits still gives correct digests and only
-    /// causes more recompressions, so no other test detects it.
+    /// Every target solves for its own plan, so the forms share no code. They
+    /// must still agree: a check that clears too few bits gives correct
+    /// digests and only causes more recompressions, so no other test sees it.
     #[test]
-    fn vectorized_prefix_matches_scalar() {
+    fn every_form_matches_scalar() {
         schedules(20_000, |w| {
-            assert_eq!(
-                prefix::mask(w),
-                prefix::scalar::mask(w),
-                "vectorized prefix diverged"
-            );
+            let want = scalar::check(w);
+            #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+            // SAFETY: the cfg guarantees `neon`.
+            assert_eq!(unsafe { neon::check(w) }, want, "neon diverged");
+            #[cfg(all(
+                any(target_arch = "x86", target_arch = "x86_64"),
+                target_feature = "sse2"
+            ))]
+            // SAFETY: the cfg guarantees `sse2`.
+            assert_eq!(unsafe { sse2::check(w) }, want, "sse2 diverged");
+            #[cfg(all(
+                any(target_arch = "x86", target_arch = "x86_64"),
+                target_feature = "sse2",
+                any(feature = "std", target_feature = "avx2")
+            ))]
+            if has_avx2() {
+                // SAFETY: just detected.
+                assert_eq!(unsafe { avx2::check(w) }, want, "avx2 diverged");
+            }
         });
     }
 
@@ -336,7 +414,7 @@ mod tests {
         let mut nonzero = 0u32;
         let mut checksum = 0xcbf2_9ce4_8422_2325u64;
         schedules(100_000, |w| {
-            let mask = ubc_check(w);
+            let mask = ubc_check(w, false);
             if mask != 0 {
                 nonzero += 1;
             }
