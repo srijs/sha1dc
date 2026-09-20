@@ -13,6 +13,7 @@ license = "MIT OR Apache-2.0"
 keywords = ["sha1", "hash", "collision", "shattered"]
 categories = ["cryptography", "no-std"]
 exclude = [
+    ".github",
     "tests/data/shattered-1.pdf",
     "tests/data/shattered-2.pdf",
 ]
