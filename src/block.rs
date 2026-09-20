@@ -86,12 +86,26 @@ fn attacked(backend: Backend, chaining_out: [u32; 5], ctx: &mut Inner, candidate
         state_65,
         ..
     } = ctx;
-    backend.ensure_states(ihv1, m1, state_58, state_65);
+    backend.ensure_states(
+        ihv1,
+        &chaining_out,
+        m1,
+        candidates & crate::ubc_check::STEP58_MASK != 0,
+        state_58,
+        state_65,
+    );
 
-    for dv in &crate::ubc_check::SHA1_DVS {
-        if candidates & (1 << dv.mask_bit) == 0 {
-            continue;
-        }
+    // Walking the set bits visits only the candidates. Reading `mask_bit`
+    // out of all 32 entries instead would touch the whole table, which is
+    // ten kilobytes, to find the one or two that are flagged.
+    let mut remaining = candidates;
+    while remaining != 0 {
+        // The mask has a bit per entry, and masking the count keeps that
+        // in range for the compiler as well as for the reader.
+        let bit = (remaining.trailing_zeros() & 31) as usize;
+        remaining &= remaining - 1;
+        let dv = &crate::ubc_check::SHA1_DVS[bit];
+        debug_assert_eq!(dv.mask_bit, bit as i32, "DV table is out of order");
 
         for (partner, (word, difference)) in ctx.m2.iter_mut().zip(ctx.m1.iter().zip(&dv.dm)) {
             *partner = word ^ difference;

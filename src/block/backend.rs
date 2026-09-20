@@ -119,22 +119,27 @@ impl Backend {
         }
     }
 
-    /// Updates `state_58` and `state_65` for this block.
+    /// Updates the stored states this block's candidates will recompress
+    /// from.
     ///
     /// The hardware backends write out the message schedule but not the
-    /// intermediate states. This recovers those states from the schedule and
-    /// does not run the compression again. It runs only for a flagged block.
+    /// intermediate states. This recovers them from the schedule and the two
+    /// chaining values, running backwards from the end, and does not run the
+    /// compression again. It runs only for a flagged block. `need_58` says
+    /// whether any candidate recompresses from step 58.
     pub(crate) fn ensure_states(
         &self,
         ihv_before: &[u32; 5],
+        ihv_after: &[u32; 5],
         m1: &[u32; 80],
+        need_58: bool,
         state_58: &mut [u32; 5],
         state_65: &mut [u32; 5],
     ) {
         if matches!(self.0, Repr::Scalar) {
             return;
         }
-        rounds::states_from_w(ihv_before, m1, state_58, state_65);
+        rounds::states_back_from_h(ihv_before, ihv_after, m1, need_58, state_58, state_65);
     }
 }
 
@@ -280,10 +285,10 @@ mod tests {
                 .quickcheck(prop as fn([u8; BLOCK_SIZE], [u32; 5]) -> bool);
         }
 
-        /// `states_from_w` must match a full scalar run for any schedule the
-        /// hardware path can leave behind.
+        /// Both state recoveries must match a full scalar run for any
+        /// schedule the hardware path can leave behind.
         #[test]
-        fn states_from_w_agrees_on_any_block() {
+        fn state_recovery_agrees_on_any_block() {
             fn prop(m: [u32; 16], ihv: [u32; 5]) -> bool {
                 let mut replayed = ihv;
                 let (mut w, mut want_58, mut want_65) = ([0u32; 80], [0u32; 5], [0u32; 5]);
@@ -292,7 +297,27 @@ mod tests {
                 let (mut got_58, mut got_65) = ([0u32; 5], [0u32; 5]);
                 rounds::states_from_w(&ihv, &w, &mut got_58, &mut got_65);
 
-                got_58 == want_58 && got_65 == want_65
+                let (mut back_58, mut back_65) = ([0u32; 5], [0u32; 5]);
+                rounds::states_back_from_h(&ihv, &replayed, &w, true, &mut back_58, &mut back_65);
+
+                // Asking for step 65 alone must leave step 58 untouched and
+                // still give step 65.
+                let (mut skipped_58, mut only_65) = ([0xDEAD_BEEFu32; 5], [0u32; 5]);
+                rounds::states_back_from_h(
+                    &ihv,
+                    &replayed,
+                    &w,
+                    false,
+                    &mut skipped_58,
+                    &mut only_65,
+                );
+
+                got_58 == want_58
+                    && got_65 == want_65
+                    && back_58 == want_58
+                    && back_65 == want_65
+                    && only_65 == want_65
+                    && skipped_58 == [0xDEAD_BEEF; 5]
             }
 
             QuickCheck::new()
@@ -301,10 +326,10 @@ mod tests {
         }
     }
 
-    /// `states_from_w` replaces a full scalar run on the hardware path, so it
-    /// must give the same result.
+    /// State recovery replaces a full scalar run on the hardware path, so
+    /// both forms must give the same result.
     #[test]
-    fn states_from_w_agrees_with_full_replay() {
+    fn state_recovery_agrees_with_full_replay() {
         let mut seed = 0xC0FF_EE00_1234_5678;
         for _ in 0..2_000 {
             let m: [u32; 16] = core::array::from_fn(|_| xorshift(&mut seed) as u32);
@@ -319,6 +344,12 @@ mod tests {
 
             assert_eq!(got_58, want_58, "state_58 diverged");
             assert_eq!(got_65, want_65, "state_65 diverged");
+
+            let (mut back_58, mut back_65) = ([0u32; 5], [0u32; 5]);
+            rounds::states_back_from_h(&ihv, &replayed, &w, true, &mut back_58, &mut back_65);
+
+            assert_eq!(back_58, want_58, "state_58 diverged running backwards");
+            assert_eq!(back_65, want_65, "state_65 diverged running backwards");
         }
     }
 }
