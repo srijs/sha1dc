@@ -58,25 +58,37 @@ use std::process::{Command, ExitCode, Stdio};
 /// many groups the prefix may spend. A group runs on every block, so the
 /// budget trades unconditional work against the guarded tail.
 ///
-/// Every target has its own optimum, measured on an Apple M-series and a Xeon
-/// Platinum 8488C. The scalar form has no lanes, so a group is one statement
-/// and it wants far fewer of them. The two four-lane forms share a plan
-/// because the lane count is all the solver sees.
+/// Every target has its own optimum, measured on an Apple M4, a Xeon Platinum
+/// 8488C and a Graviton4. The scalar form has no lanes, so a group is one
+/// statement and it wants far fewer of them. The two four-lane forms share a
+/// plan because the lane count is all the solver sees.
+///
+/// These budgets belong to the measure [`solve`] uses. Spending on coverage
+/// wanted a long prefix, because the last group still bought something;
+/// spending on how often the tail runs does not, because by then every DV is
+/// deep enough that another group buys almost nothing and still costs a pair
+/// of loads on every block. So the vector budgets come down from 22, which
+/// was tuned against the old measure, and the scalar one rises from 40 but
+/// not as far as the old measure would suggest.
+///
+/// Re-measure all of them when the solver changes. The four-lane number
+/// matters most: on a Graviton4 the old 22 gives 1.07 GiB/s against 1.23 at
+/// 17, and the three machines disagree by less than a percent about 17.
 const TARGETS: &[Target] = &[
     Target {
         name: "scalar",
         width: 1,
-        groups: 40,
+        groups: 45,
     },
     Target {
         name: "neon",
         width: 4,
-        groups: 22,
+        groups: 17,
     },
     Target {
         name: "sse2",
         width: 4,
-        groups: 22,
+        groups: 17,
     },
     Target {
         name: "avx2",
@@ -279,16 +291,25 @@ fn report() {
             "\n{} — costed at {} lane(s), shipping {} groups",
             target.name, target.width, target.groups
         );
-        println!("groups  families  checks  tail  shared  per-DV");
+        println!("groups  families  checks  tail  shared  per-DV  worst  P(tail)");
         for n in [8, 10, 13, 16, 20, 22, 26, 30, 40, 55] {
             let plan = solve::solve(target.width, n);
             let checks: usize = plan.families.iter().map(|f| f.members.len()).sum();
             let shared = plan.tail.iter().filter(|c| c.dvs.count_ones() > 1).count();
+            // A DV the prefix covers to rank `r` reaches the tail with
+            // probability `2^-r`, so this is how often the tail runs at all.
+            let enters = 1.0
+                - plan
+                    .prefix_ranks
+                    .iter()
+                    .map(|&r| 1.0 - (-(r as f64) * std::f64::consts::LN_2).exp())
+                    .product::<f64>();
             println!(
-                "{n:>6}  {:>8}  {checks:>6}  {:>4}  {shared:>6}  {:>6}",
+                "{n:>6}  {:>8}  {checks:>6}  {:>4}  {shared:>6}  {:>6}  {:>5}  {enters:>7.4}",
                 plan.families.len(),
                 plan.tail.len(),
-                plan.tail.len() - shared
+                plan.tail.len() - shared,
+                plan.prefix_ranks.iter().min().unwrap(),
             );
         }
     }

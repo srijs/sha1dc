@@ -33,92 +33,12 @@ fn prefix(w: &[u32; 80]) -> u32 {
             | DV_II_50_0_BIT
             | DV_II_51_0_BIT);
 
-    mask &= (((w[40] >> 29) ^ (w[41] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_44_0_BIT
-            | DV_I_47_0_BIT
-            | DV_I_48_0_BIT
-            | DV_II_46_0_BIT
-            | DV_II_47_0_BIT
-            | DV_II_56_0_BIT);
-
-    mask &= (((w[43] >> 29) ^ (w[44] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_47_0_BIT
-            | DV_I_50_0_BIT
-            | DV_I_51_0_BIT
-            | DV_II_45_0_BIT
-            | DV_II_49_0_BIT
-            | DV_II_50_0_BIT);
-
-    mask &= (((w[45] >> 29) ^ (w[46] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_49_0_BIT
-            | DV_I_52_0_BIT
-            | DV_II_46_0_BIT
-            | DV_II_47_0_BIT
-            | DV_II_51_0_BIT
-            | DV_II_52_0_BIT);
-
     mask &= (((w[46] >> 29) ^ (w[47] >> 29)) & 1).wrapping_sub(1)
         | !(DV_I_43_0_BIT
             | DV_I_50_0_BIT
             | DV_II_47_0_BIT
             | DV_II_48_0_BIT
             | DV_II_52_0_BIT
-            | DV_II_53_0_BIT);
-
-    mask &= (((w[47] >> 29) ^ (w[48] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_44_0_BIT
-            | DV_I_51_0_BIT
-            | DV_II_48_0_BIT
-            | DV_II_49_0_BIT
-            | DV_II_53_0_BIT
-            | DV_II_54_0_BIT);
-
-    mask &= (((w[48] >> 29) ^ (w[49] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_45_0_BIT
-            | DV_I_52_0_BIT
-            | DV_II_49_0_BIT
-            | DV_II_50_0_BIT
-            | DV_II_54_0_BIT
-            | DV_II_55_0_BIT);
-
-    mask &= (((w[49] >> 29) ^ (w[50] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_46_0_BIT
-            | DV_II_45_0_BIT
-            | DV_II_50_0_BIT
-            | DV_II_51_0_BIT
-            | DV_II_55_0_BIT
-            | DV_II_56_0_BIT);
-
-    mask &= (((w[41] >> 4) ^ (w[44] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_43_0_BIT
-            | DV_I_45_0_BIT
-            | DV_I_47_0_BIT
-            | DV_I_51_0_BIT
-            | DV_II_45_0_BIT
-            | DV_II_50_0_BIT);
-
-    mask &= (((w[42] >> 4) ^ (w[45] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_44_0_BIT
-            | DV_I_46_0_BIT
-            | DV_I_48_0_BIT
-            | DV_I_52_0_BIT
-            | DV_II_46_0_BIT
-            | DV_II_51_0_BIT);
-
-    mask &= (((w[43] >> 4) ^ (w[46] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_43_0_BIT
-            | DV_I_45_0_BIT
-            | DV_I_47_0_BIT
-            | DV_I_49_0_BIT
-            | DV_II_47_0_BIT
-            | DV_II_52_0_BIT);
-
-    mask &= (((w[44] >> 4) ^ (w[47] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_44_0_BIT
-            | DV_I_46_0_BIT
-            | DV_I_48_0_BIT
-            | DV_I_50_0_BIT
-            | DV_II_48_0_BIT
             | DV_II_53_0_BIT);
 
     mask &= (((w[45] >> 4) ^ (w[48] >> 29)) & 1).wrapping_sub(1)
@@ -129,78 +49,32 @@ fn prefix(w: &[u32; 80]) -> u32 {
             | DV_II_49_0_BIT
             | DV_II_54_0_BIT);
 
-    mask &= (((w[46] >> 4) ^ (w[49] >> 29)) & 1).wrapping_sub(1)
+    mask &= (((w[49] >> 29) ^ (w[50] >> 29)) & 1).wrapping_sub(1)
         | !(DV_I_46_0_BIT
-            | DV_I_48_0_BIT
-            | DV_I_50_0_BIT
-            | DV_I_52_0_BIT
-            | DV_II_50_0_BIT
-            | DV_II_55_0_BIT);
-
-    mask &= (((w[47] >> 4) ^ (w[50] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_47_0_BIT
-            | DV_I_49_0_BIT
-            | DV_I_51_0_BIT
             | DV_II_45_0_BIT
+            | DV_II_50_0_BIT
             | DV_II_51_0_BIT
+            | DV_II_55_0_BIT
             | DV_II_56_0_BIT);
 
-    mask &= (((w[41] >> 29) ^ (w[42] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_45_0_BIT | DV_I_48_0_BIT | DV_I_49_0_BIT | DV_II_47_0_BIT | DV_II_48_0_BIT);
-
-    mask &= (((w[42] >> 29) ^ (w[43] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_46_0_BIT | DV_I_49_0_BIT | DV_I_50_0_BIT | DV_II_48_0_BIT | DV_II_49_0_BIT);
-
-    mask &= (((w[50] >> 29) ^ (w[51] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_51_0_BIT | DV_II_52_0_BIT | DV_II_56_0_BIT);
-
-    mask &= (((w[52] >> 29) ^ (w[53] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT | DV_II_53_0_BIT | DV_II_54_0_BIT);
-
-    mask &= (((w[53] >> 29) ^ (w[54] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT | DV_II_54_0_BIT | DV_II_55_0_BIT);
-
-    mask &= (((w[54] >> 29) ^ (w[55] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT | DV_II_55_0_BIT | DV_II_56_0_BIT);
-
-    mask &= (((w[37] >> 4) ^ (w[40] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_43_0_BIT | DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT);
-
-    mask &= (((w[38] >> 4) ^ (w[41] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_44_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT);
-
-    mask &= (((w[39] >> 4) ^ (w[42] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_49_0_BIT | DV_II_48_0_BIT | DV_II_55_0_BIT);
-
-    mask &= (((w[40] >> 4) ^ (w[43] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT);
-
-    mask &= (((w[48] >> 4) ^ (w[51] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_52_0_BIT);
-
-    mask &= (((w[49] >> 4) ^ (w[52] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_49_0_BIT | DV_I_51_0_BIT | DV_II_45_0_BIT | DV_II_47_0_BIT | DV_II_53_0_BIT);
-
-    mask &= (((w[50] >> 4) ^ (w[53] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_48_0_BIT | DV_II_54_0_BIT);
-
-    mask &= (((w[51] >> 29) ^ (w[52] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_52_0_BIT | DV_II_53_0_BIT);
-
-    mask &= (((w[55] >> 29) ^ (w[56] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_51_0_BIT | DV_II_56_0_BIT);
-
-    mask &= (((w[51] >> 4) ^ (w[54] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_49_0_BIT | DV_II_55_0_BIT);
-
-    mask &= (((w[52] >> 4) ^ (w[55] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_50_0_BIT | DV_II_56_0_BIT);
-
-    mask &= (((w[36] >> 4) ^ (w[40] >> 29)) & 1).wrapping_sub(1)
-        | !(DV_I_46_0_BIT | DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT);
+    mask &= (((w[40] >> 29) ^ (w[41] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_44_0_BIT
+            | DV_I_47_0_BIT
+            | DV_I_48_0_BIT
+            | DV_II_46_0_BIT
+            | DV_II_47_0_BIT
+            | DV_II_56_0_BIT);
 
     mask &= (0u32).wrapping_sub(((w[36] >> 1) ^ (w[37] >> 6)) & 1)
         | !(DV_I_47_2_BIT | DV_I_50_2_BIT | DV_II_46_2_BIT);
+
+    mask &= (((w[47] >> 29) ^ (w[48] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_44_0_BIT
+            | DV_I_51_0_BIT
+            | DV_II_48_0_BIT
+            | DV_II_49_0_BIT
+            | DV_II_53_0_BIT
+            | DV_II_54_0_BIT);
 
     mask &= (0u32).wrapping_sub(((w[39] >> 1) ^ (w[40] >> 6)) & 1)
         | !(DV_I_46_2_BIT | DV_I_50_2_BIT | DV_II_49_2_BIT);
@@ -211,14 +85,145 @@ fn prefix(w: &[u32; 80]) -> u32 {
     mask &= (0u32).wrapping_sub(((w[41] >> 1) ^ (w[42] >> 6)) & 1)
         | !(DV_I_48_2_BIT | DV_II_46_2_BIT | DV_II_51_2_BIT);
 
-    mask &= (0u32).wrapping_sub(((w[39] >> 4) ^ (w[40] >> 29)) & 1)
-        | !(DV_I_43_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT);
+    mask &= (((w[43] >> 4) ^ (w[46] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_43_0_BIT
+            | DV_I_45_0_BIT
+            | DV_I_47_0_BIT
+            | DV_I_49_0_BIT
+            | DV_II_47_0_BIT
+            | DV_II_52_0_BIT);
 
-    mask &= (0u32).wrapping_sub(((w[40] >> 4) ^ (w[41] >> 29)) & 1)
-        | !(DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT);
+    mask &= (((w[46] >> 4) ^ (w[49] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_46_0_BIT
+            | DV_I_48_0_BIT
+            | DV_I_50_0_BIT
+            | DV_I_52_0_BIT
+            | DV_II_50_0_BIT
+            | DV_II_55_0_BIT);
 
-    mask &= (0u32).wrapping_sub(((w[41] >> 4) ^ (w[42] >> 29)) & 1)
-        | !(DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT);
+    mask &= (((w[45] >> 6) ^ (w[47] >> 6)) & 1).wrapping_sub(1)
+        | !(DV_I_47_2_BIT | DV_I_49_2_BIT | DV_I_51_2_BIT);
+
+    mask &= (((w[45] >> 29) ^ (w[46] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_49_0_BIT
+            | DV_I_52_0_BIT
+            | DV_II_46_0_BIT
+            | DV_II_47_0_BIT
+            | DV_II_51_0_BIT
+            | DV_II_52_0_BIT);
+
+    mask &= (((w[44] >> 4) ^ (w[47] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_44_0_BIT
+            | DV_I_46_0_BIT
+            | DV_I_48_0_BIT
+            | DV_I_50_0_BIT
+            | DV_II_48_0_BIT
+            | DV_II_53_0_BIT);
+
+    mask &= (((w[48] >> 29) ^ (w[49] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_45_0_BIT
+            | DV_I_52_0_BIT
+            | DV_II_49_0_BIT
+            | DV_II_50_0_BIT
+            | DV_II_54_0_BIT
+            | DV_II_55_0_BIT);
+
+    mask &= (((w[44] >> 6) ^ (w[46] >> 6)) & 1).wrapping_sub(1)
+        | !(DV_I_46_2_BIT | DV_I_48_2_BIT | DV_I_50_2_BIT);
+
+    mask &= (((w[47] >> 4) ^ (w[50] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_47_0_BIT
+            | DV_I_49_0_BIT
+            | DV_I_51_0_BIT
+            | DV_II_45_0_BIT
+            | DV_II_51_0_BIT
+            | DV_II_56_0_BIT);
+
+    mask &=
+        (0u32).wrapping_sub(((w[35] >> 1) ^ (w[36] >> 6)) & 1) | !(DV_I_46_2_BIT | DV_I_49_2_BIT);
+
+    mask &=
+        (0u32).wrapping_sub(((w[44] >> 1) ^ (w[45] >> 6)) & 1) | !(DV_I_51_2_BIT | DV_II_49_2_BIT);
+
+    mask &=
+        (((w[42] >> 6) ^ (w[43] >> 1)) & 1).wrapping_sub(1) | !(DV_II_46_2_BIT | DV_II_51_2_BIT);
+
+    mask &= (((w[37] >> 4) ^ (w[40] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_43_0_BIT | DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT);
+
+    mask &= (((w[41] >> 6) ^ (w[42] >> 1)) & 1).wrapping_sub(1) | !(DV_I_51_2_BIT | DV_II_50_2_BIT);
+
+    mask &= (((w[40] >> 4) ^ (w[43] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT);
+
+    mask &= (((w[41] >> 4) ^ (w[44] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_43_0_BIT
+            | DV_I_45_0_BIT
+            | DV_I_47_0_BIT
+            | DV_I_51_0_BIT
+            | DV_II_45_0_BIT
+            | DV_II_50_0_BIT);
+
+    mask &= (((w[52] >> 29) ^ (w[53] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT | DV_II_53_0_BIT | DV_II_54_0_BIT);
+
+    mask &= (((w[40] >> 6) ^ (w[41] >> 1)) & 1).wrapping_sub(1) | !(DV_I_50_2_BIT | DV_II_49_2_BIT);
+
+    mask &= (((w[46] >> 6) ^ (w[47] >> 1)) & 1).wrapping_sub(1) | !(DV_I_46_2_BIT | DV_II_50_2_BIT);
+
+    mask &= (((w[47] >> 6) ^ (w[48] >> 1)) & 1).wrapping_sub(1) | !(DV_I_47_2_BIT | DV_II_51_2_BIT);
+
+    mask &= (((w[42] >> 4) ^ (w[45] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_44_0_BIT
+            | DV_I_46_0_BIT
+            | DV_I_48_0_BIT
+            | DV_I_52_0_BIT
+            | DV_II_46_0_BIT
+            | DV_II_51_0_BIT);
+
+    mask &=
+        (0u32).wrapping_sub(((w[37] >> 1) ^ (w[38] >> 6)) & 1) | !(DV_I_48_2_BIT | DV_I_51_2_BIT);
+
+    mask &= (((w[43] >> 6) ^ (w[45] >> 6)) & 1).wrapping_sub(1) | !(DV_I_47_2_BIT | DV_I_49_2_BIT);
+
+    mask &= (((w[53] >> 29) ^ (w[54] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT | DV_II_54_0_BIT | DV_II_55_0_BIT);
+
+    mask &= (((w[41] >> 29) ^ (w[42] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_45_0_BIT | DV_I_48_0_BIT | DV_I_49_0_BIT | DV_II_47_0_BIT | DV_II_48_0_BIT);
+
+    mask &= (((w[50] >> 29) ^ (w[51] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_51_0_BIT | DV_II_52_0_BIT | DV_II_56_0_BIT);
+
+    mask &=
+        (0u32).wrapping_sub(((w[61] >> 2) ^ (w[62] >> 7)) & 1) | !(DV_I_46_2_BIT | DV_II_46_2_BIT);
+
+    mask &= (((w[46] >> 6) ^ (w[48] >> 6)) & 1).wrapping_sub(1) | !(DV_I_48_2_BIT | DV_I_50_2_BIT);
+
+    mask &= (((w[39] >> 4) ^ (w[42] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_49_0_BIT | DV_II_48_0_BIT | DV_II_55_0_BIT);
+
+    mask &= (((w[43] >> 29) ^ (w[44] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_47_0_BIT
+            | DV_I_50_0_BIT
+            | DV_I_51_0_BIT
+            | DV_II_45_0_BIT
+            | DV_II_49_0_BIT
+            | DV_II_50_0_BIT);
+
+    mask &= (((w[47] >> 6) ^ (w[49] >> 6)) & 1).wrapping_sub(1) | !(DV_I_49_2_BIT | DV_I_51_2_BIT);
+
+    mask &= (((w[51] >> 29) ^ (w[52] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_52_0_BIT | DV_II_53_0_BIT);
+
+    mask &= (0u32).wrapping_sub((w[36] ^ (w[37] >> 5)) & 1) | !(DV_II_49_2_BIT);
+
+    mask &= (0u32).wrapping_sub((w[37] ^ (w[38] >> 5)) & 1) | !(DV_II_50_2_BIT);
+
+    mask &= (0u32).wrapping_sub((w[38] ^ (w[39] >> 5)) & 1) | !(DV_II_51_2_BIT);
+
+    mask &= (((w[38] >> 4) ^ (w[41] >> 29)) & 1).wrapping_sub(1)
+        | !(DV_I_44_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT);
 
     mask
 }
@@ -226,6 +231,38 @@ fn prefix(w: &[u32; 80]) -> u32 {
 /// The checks the prefix leaves. `mask` is never zero here.
 #[inline(always)]
 fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
+    if mask & (DV_I_46_0_BIT | DV_I_49_0_BIT | DV_I_50_0_BIT | DV_II_48_0_BIT | DV_II_49_0_BIT) != 0
+    {
+        mask &= (((w[42] >> 29) ^ (w[43] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_46_0_BIT | DV_I_49_0_BIT | DV_I_50_0_BIT | DV_II_48_0_BIT | DV_II_49_0_BIT);
+    }
+    if mask & (DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_52_0_BIT) != 0
+    {
+        mask &= (((w[48] >> 4) ^ (w[51] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_52_0_BIT);
+    }
+    if mask & (DV_I_49_0_BIT | DV_I_51_0_BIT | DV_II_45_0_BIT | DV_II_47_0_BIT | DV_II_53_0_BIT)
+        != 0
+    {
+        mask &= (((w[49] >> 4) ^ (w[52] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_49_0_BIT | DV_I_51_0_BIT | DV_II_45_0_BIT | DV_II_47_0_BIT | DV_II_53_0_BIT);
+    }
+    if mask & (DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_48_0_BIT | DV_II_54_0_BIT)
+        != 0
+    {
+        mask &= (((w[50] >> 4) ^ (w[53] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_48_0_BIT | DV_II_54_0_BIT);
+    }
+    if mask & (DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT | DV_II_55_0_BIT | DV_II_56_0_BIT)
+        != 0
+    {
+        mask &= (((w[54] >> 29) ^ (w[55] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT | DV_II_55_0_BIT | DV_II_56_0_BIT);
+    }
+    if mask & (DV_I_46_0_BIT | DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT) != 0 {
+        mask &= (((w[36] >> 4) ^ (w[40] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_46_0_BIT | DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT);
+    }
     if mask & (DV_I_47_0_BIT | DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT) != 0 {
         mask &= (((w[37] >> 4) ^ (w[41] >> 29)) & 1).wrapping_sub(1)
             | !(DV_I_47_0_BIT | DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT);
@@ -254,9 +291,33 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
         mask &= (((w[44] >> 4) ^ (w[48] >> 29)) & 1).wrapping_sub(1)
             | !(DV_I_44_0_BIT | DV_II_48_0_BIT | DV_II_53_0_BIT | DV_II_56_0_BIT);
     }
+    if mask & (DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_49_0_BIT | DV_II_55_0_BIT) != 0 {
+        mask &= (((w[51] >> 4) ^ (w[54] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_49_0_BIT | DV_II_55_0_BIT);
+    }
+    if mask & (DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_50_0_BIT | DV_II_56_0_BIT) != 0 {
+        mask &= (((w[52] >> 4) ^ (w[55] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_50_0_BIT | DV_II_56_0_BIT);
+    }
+    if mask & (DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_51_0_BIT | DV_II_56_0_BIT) != 0 {
+        mask &= (((w[55] >> 29) ^ (w[56] >> 29)) & 1).wrapping_sub(1)
+            | !(DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_51_0_BIT | DV_II_56_0_BIT);
+    }
     if mask & (DV_I_45_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT) != 0 {
         mask &= (((w[35] >> 4) ^ (w[39] >> 29)) & 1).wrapping_sub(1)
             | !(DV_I_45_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT);
+    }
+    if mask & (DV_I_43_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[37] >> 4) ^ (w[39] >> 4)) & 1)
+            | !(DV_I_43_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT);
+    }
+    if mask & (DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[38] >> 4) ^ (w[40] >> 4)) & 1)
+            | !(DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT);
+    }
+    if mask & (DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT) != 0 {
+        mask &= (0u32).wrapping_sub(((w[39] >> 4) ^ (w[41] >> 4)) & 1)
+            | !(DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT);
     }
     if mask & (DV_I_44_0_BIT | DV_I_46_0_BIT | DV_II_56_0_BIT) != 0 {
         mask &= (0u32).wrapping_sub(((w[40] >> 4) ^ (w[42] >> 4)) & 1)
@@ -282,17 +343,9 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
         mask &= (0u32).wrapping_sub(((w[44] >> 4) ^ (w[46] >> 4)) & 1)
             | !(DV_I_46_0_BIT | DV_I_48_0_BIT | DV_I_50_0_BIT);
     }
-    if mask & (DV_I_46_2_BIT | DV_I_48_2_BIT | DV_I_50_2_BIT) != 0 {
-        mask &= (((w[44] >> 6) ^ (w[46] >> 6)) & 1).wrapping_sub(1)
-            | !(DV_I_46_2_BIT | DV_I_48_2_BIT | DV_I_50_2_BIT);
-    }
     if mask & (DV_I_47_0_BIT | DV_I_49_0_BIT | DV_I_51_0_BIT) != 0 {
         mask &= (0u32).wrapping_sub(((w[45] >> 4) ^ (w[47] >> 4)) & 1)
             | !(DV_I_47_0_BIT | DV_I_49_0_BIT | DV_I_51_0_BIT);
-    }
-    if mask & (DV_I_47_2_BIT | DV_I_49_2_BIT | DV_I_51_2_BIT) != 0 {
-        mask &= (((w[45] >> 6) ^ (w[47] >> 6)) & 1).wrapping_sub(1)
-            | !(DV_I_47_2_BIT | DV_I_49_2_BIT | DV_I_51_2_BIT);
     }
     if mask & (DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT) != 0 {
         mask &= (0u32).wrapping_sub(((w[46] >> 4) ^ (w[48] >> 4)) & 1)
@@ -314,10 +367,6 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
         mask &= (0u32).wrapping_sub(((w[53] >> 29) ^ (w[56] >> 29)) & 1)
             | !(DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_49_0_BIT);
     }
-    if mask & (DV_I_46_2_BIT | DV_I_49_2_BIT) != 0 {
-        mask &= (0u32).wrapping_sub(((w[35] >> 1) ^ (w[36] >> 6)) & 1)
-            | !(DV_I_46_2_BIT | DV_I_49_2_BIT);
-    }
     if mask & (DV_I_51_0_BIT | DV_II_47_0_BIT) != 0 {
         mask &= (((w[35] >> 3) ^ (w[39] >> 28)) & 1).wrapping_sub(1)
             | !(DV_I_51_0_BIT | DV_II_47_0_BIT);
@@ -326,49 +375,9 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
         mask &= (0u32).wrapping_sub(((w[36] >> 4) ^ (w[38] >> 4)) & 1)
             | !(DV_II_52_0_BIT | DV_II_54_0_BIT);
     }
-    if mask & (DV_I_48_2_BIT | DV_I_51_2_BIT) != 0 {
-        mask &= (0u32).wrapping_sub(((w[37] >> 1) ^ (w[38] >> 6)) & 1)
-            | !(DV_I_48_2_BIT | DV_I_51_2_BIT);
-    }
-    if mask & (DV_I_50_2_BIT | DV_II_49_2_BIT) != 0 {
-        mask &= (0u32).wrapping_sub(((w[39] >> 1) ^ (w[41] >> 1)) & 1)
-            | !(DV_I_50_2_BIT | DV_II_49_2_BIT);
-    }
-    if mask & (DV_I_51_2_BIT | DV_II_50_2_BIT) != 0 {
-        mask &= (0u32).wrapping_sub(((w[40] >> 1) ^ (w[42] >> 1)) & 1)
-            | !(DV_I_51_2_BIT | DV_II_50_2_BIT);
-    }
-    if mask & (DV_II_46_2_BIT | DV_II_51_2_BIT) != 0 {
-        mask &= (0u32).wrapping_sub(((w[41] >> 1) ^ (w[43] >> 1)) & 1)
-            | !(DV_II_46_2_BIT | DV_II_51_2_BIT);
-    }
     if mask & (DV_I_46_2_BIT | DV_I_48_2_BIT) != 0 {
         mask &=
             (((w[42] >> 6) ^ (w[44] >> 6)) & 1).wrapping_sub(1) | !(DV_I_46_2_BIT | DV_I_48_2_BIT);
-    }
-    if mask & (DV_I_47_2_BIT | DV_I_49_2_BIT) != 0 {
-        mask &=
-            (((w[43] >> 6) ^ (w[45] >> 6)) & 1).wrapping_sub(1) | !(DV_I_47_2_BIT | DV_I_49_2_BIT);
-    }
-    if mask & (DV_I_51_2_BIT | DV_II_49_2_BIT) != 0 {
-        mask &= (0u32).wrapping_sub(((w[44] >> 1) ^ (w[45] >> 6)) & 1)
-            | !(DV_I_51_2_BIT | DV_II_49_2_BIT);
-    }
-    if mask & (DV_I_48_2_BIT | DV_I_50_2_BIT) != 0 {
-        mask &=
-            (((w[44] >> 6) ^ (w[48] >> 6)) & 1).wrapping_sub(1) | !(DV_I_48_2_BIT | DV_I_50_2_BIT);
-    }
-    if mask & (DV_I_49_2_BIT | DV_I_51_2_BIT) != 0 {
-        mask &=
-            (((w[45] >> 6) ^ (w[49] >> 6)) & 1).wrapping_sub(1) | !(DV_I_49_2_BIT | DV_I_51_2_BIT);
-    }
-    if mask & (DV_I_46_2_BIT | DV_II_50_2_BIT) != 0 {
-        mask &=
-            (((w[46] >> 6) ^ (w[47] >> 1)) & 1).wrapping_sub(1) | !(DV_I_46_2_BIT | DV_II_50_2_BIT);
-    }
-    if mask & (DV_I_47_2_BIT | DV_II_51_2_BIT) != 0 {
-        mask &=
-            (((w[47] >> 6) ^ (w[48] >> 1)) & 1).wrapping_sub(1) | !(DV_I_47_2_BIT | DV_II_51_2_BIT);
     }
     if mask & (DV_I_50_2_BIT | DV_II_46_2_BIT) != 0 {
         mask &=
@@ -411,10 +420,6 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
     }
     if mask & (DV_I_46_0_BIT | DV_II_46_0_BIT) != 0 {
         mask &= (0u32).wrapping_sub((w[61] ^ (w[62] >> 5)) & 1) | !(DV_I_46_0_BIT | DV_II_46_0_BIT);
-    }
-    if mask & (DV_I_46_2_BIT | DV_II_46_2_BIT) != 0 {
-        mask &= (0u32).wrapping_sub(((w[61] >> 2) ^ (w[62] >> 7)) & 1)
-            | !(DV_I_46_2_BIT | DV_II_46_2_BIT);
     }
     if mask & (DV_I_47_0_BIT | DV_II_47_0_BIT) != 0 {
         mask &= (0u32).wrapping_sub((w[62] ^ (w[63] >> 5)) & 1) | !(DV_I_47_0_BIT | DV_II_47_0_BIT);
@@ -521,8 +526,7 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
             mask &= !DV_II_49_0_BIT;
         }
         if mask & DV_II_49_2_BIT != 0
-            && ((w[36] ^ (w[37] >> 5)) & 1 == 0
-                || (w[36] ^ (w[41] >> 30)) & 1 == 0
+            && ((w[36] ^ (w[41] >> 30)) & 1 == 0
                 || ((w[44] >> 1) ^ (w[46] >> 1)) & 1 == 0
                 || ((w[50] >> 1) ^ (w[51] >> 6)) & 1 == 0
                 || ((w[50] >> 1) ^ (w[53] >> 6)) & 1 == 0
@@ -539,8 +543,7 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
             mask &= !DV_II_50_0_BIT;
         }
         if mask & DV_II_50_2_BIT != 0
-            && ((w[37] ^ (w[38] >> 5)) & 1 == 0
-                || (w[37] ^ (w[42] >> 30)) & 1 == 0
+            && ((w[37] ^ (w[42] >> 30)) & 1 == 0
                 || ((w[45] >> 1) ^ (w[46] >> 6)) & 1 == 0
                 || ((w[51] >> 1) ^ (w[52] >> 6)) & 1 == 0
                 || ((w[51] >> 1) ^ (w[54] >> 6)) & 1 == 0
@@ -561,8 +564,7 @@ fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
 
     if mask & (DV_II_51_2_BIT | DV_II_52_0_BIT | DV_II_53_0_BIT) != 0 {
         if mask & DV_II_51_2_BIT != 0
-            && ((w[38] ^ (w[39] >> 5)) & 1 == 0
-                || (w[38] ^ (w[43] >> 30)) & 1 == 0
+            && ((w[38] ^ (w[43] >> 30)) & 1 == 0
                 || ((w[46] >> 1) ^ (w[47] >> 6)) & 1 == 0
                 || ((w[52] >> 1) ^ (w[53] >> 6)) & 1 == 0
                 || ((w[52] >> 1) ^ (w[55] >> 6)) & 1 == 0

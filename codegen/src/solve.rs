@@ -14,6 +14,19 @@
 //! word gap and one bit pair, over a continuous range of `i`, so that eight
 //! of them fit in one pair of loads. This module picks that basis instead.
 //! It is the same span either way, so `matches_c_reference` still holds.
+//!
+//! # What the prefix is spent on
+//!
+//! The prefix runs on every block; the tail runs only when the prefix leaves
+//! some DV bit set. A DV the prefix has covered to rank `r` leaves its bit
+//! set with probability `2^-r`, so what the prefix buys is the drop in
+//! [`survivors`], the expected number of survivors.
+//!
+//! Total coverage is the wrong measure for that. It values a DV's eleventh
+//! condition the same as another DV's first, when the first is worth 1024
+//! times more, and a greedy spending on coverage will leave a DV at rank 0
+//! while it deepens one already at rank 11. That leaves the tail entered on
+//! every block, and the `mask == 0` return after the prefix unreachable.
 
 use std::collections::HashMap;
 
@@ -50,6 +63,9 @@ pub struct Family {
 pub struct Plan {
     pub families: Vec<Family>,
     pub tail: Vec<Cond>,
+    /// What rank the prefix reaches for each DV. A DV at rank `r` survives
+    /// the prefix, and so enters the tail, with probability `2^-r`.
+    pub prefix_ranks: [u32; 32],
 }
 
 /// Union-find over message bits that also tracks the XOR of each bit with
@@ -198,19 +214,20 @@ fn required() -> u32 {
     UBCS.iter().map(|u: &Ubc| u.dvs.count_ones()).sum()
 }
 
-/// A candidate step: what it gains, what it costs in groups, the conditions
-/// it adds, and the union-find state that results.
-type Candidate = (u32, usize, Vec<Cond>, HashMap<usize, Forest>);
+/// A candidate step: what it saves in expected survivors, what it costs in
+/// groups, the conditions it adds, the union-find state that results, and
+/// the rank it gains for each DV.
+type Candidate = (u64, usize, Vec<Cond>, HashMap<usize, Forest>, [u32; 32]);
 
-/// Applies `conds` to `state` and returns how many of the unions were new.
-/// Only the DVs a condition names are touched, so a trial is cheap.
+/// Applies `conds` to `state` and returns how many of the unions were new,
+/// per DV. Only the DVs a condition names are touched, so a trial is cheap.
 fn apply(
     state: &mut HashMap<usize, Forest>,
     base: &[Forest; 32],
     bits: &Bits,
     conds: &[Cond],
-) -> u32 {
-    let mut gain = 0;
+) -> [u32; 32] {
+    let mut gain = [0; 32];
     for c in conds {
         let (x, y) = (bits.index[&(c.i, c.a)], bits.index[&(c.j, c.b)]);
         for (dv, start) in base.iter().enumerate() {
@@ -219,11 +236,18 @@ fn apply(
             }
             let forest = state.entry(dv).or_insert_with(|| start.clone());
             if forest.union(x, y, c.c) {
-                gain += 1;
+                gain[dv] += 1;
             }
         }
     }
     gain
+}
+
+/// The expected number of DV bits that survive a prefix reaching `ranks`,
+/// which is `sum 2^-r`. The scale is `2^-32` per unit, so that the rank of
+/// the longest DV still lands on a whole number and all 32 fit in a `u64`.
+fn survivors(ranks: &[u32; 32]) -> u64 {
+    ranks.iter().map(|&r| 1u64 << (32 - r.min(32))).sum()
 }
 
 /// Builds the check.
@@ -266,12 +290,14 @@ pub fn solve(width: usize, groups: usize) -> Plan {
     runs.sort_by_key(|r| (signature(&r[0]), r[0].i, r.len()));
 
     let mut live: [Forest; 32] = std::array::from_fn(|_| Forest::new(bits.vertex.len()));
+    let mut ranks = [0u32; 32];
     let mut covered = 0;
     let mut families: Vec<Family> = Vec::new();
     let mut spent = 0;
 
     while spent < groups && covered < goal {
         let mut best: Option<Candidate> = None;
+        let before = survivors(&ranks);
         for run in &runs {
             let cost = run.len().div_ceil(width);
             if spent + cost > groups {
@@ -279,25 +305,34 @@ pub fn solve(width: usize, groups: usize) -> Plan {
             }
             let mut trial = HashMap::new();
             let gain = apply(&mut trial, &live, &bits, run);
-            if gain == 0 {
+            if gain.iter().sum::<u32>() == 0 {
                 continue;
             }
-            // Per group, not per condition: a group is what costs.
+            let mut after = ranks;
+            for dv in 0..32 {
+                after[dv] += gain[dv];
+            }
+            // What the group buys is the drop in expected survivors, and
+            // what it costs is one group, not one condition.
+            let drop = before - survivors(&after);
             let better = match &best {
                 None => true,
-                Some((g, c, _, _)) => gain * *c as u32 > *g * cost as u32,
+                Some((d, c, _, _, _)) => drop * *c as u64 > *d * cost as u64,
             };
             if better {
-                best = Some((gain, cost, run.clone(), trial));
+                best = Some((drop, cost, run.clone(), trial, gain));
             }
         }
-        let Some((gain, cost, run, trial)) = best else {
+        let Some((_, cost, run, trial, gain)) = best else {
             break;
         };
         for (dv, forest) in trial {
             live[dv] = forest;
         }
-        covered += gain;
+        for dv in 0..32 {
+            ranks[dv] += gain[dv];
+        }
+        covered += gain.iter().sum::<u32>();
         spent += cost;
         let s = signature(&run[0]);
         families.push(Family {
@@ -319,7 +354,9 @@ pub fn solve(width: usize, groups: usize) -> Plan {
         let mut best: Option<(u32, Cond, HashMap<usize, Forest>)> = None;
         for c in &cands {
             let mut trial = HashMap::new();
-            let gain = apply(&mut trial, &live, &bits, std::slice::from_ref(c));
+            let gain: u32 = apply(&mut trial, &live, &bits, std::slice::from_ref(c))
+                .iter()
+                .sum();
             if gain > 0 && best.as_ref().is_none_or(|(g, _, _)| gain > *g) {
                 best = Some((gain, *c, trial));
             }
@@ -338,5 +375,9 @@ pub fn solve(width: usize, groups: usize) -> Plan {
         covered, goal,
         "the chosen basis does not span the published one"
     );
-    Plan { families, tail }
+    Plan {
+        families,
+        tail,
+        prefix_ranks: ranks,
+    }
 }
