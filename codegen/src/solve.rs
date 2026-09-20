@@ -183,9 +183,9 @@ fn spans(bits: &Bits) -> [Forest; 32] {
     let mut out = std::array::from_fn(|_| Forest::new(bits.vertex.len()));
     for u in UBCS {
         let (x, y) = (bits.index[&(u.i, u.a)], bits.index[&(u.j, u.b)]);
-        for dv in 0..32 {
+        for (dv, forest) in out.iter_mut().enumerate() {
             if u.dvs >> dv & 1 == 1 {
-                out[dv].union(x, y, u.c);
+                forest.union(x, y, u.c);
             }
         }
     }
@@ -198,6 +198,10 @@ fn required() -> u32 {
     UBCS.iter().map(|u: &Ubc| u.dvs.count_ones()).sum()
 }
 
+/// A candidate step: what it gains, what it costs in groups, the conditions
+/// it adds, and the union-find state that results.
+type Candidate = (u32, usize, Vec<Cond>, HashMap<usize, Forest>);
+
 /// Applies `conds` to `state` and returns how many of the unions were new.
 /// Only the DVs a condition names are touched, so a trial is cheap.
 fn apply(
@@ -209,11 +213,11 @@ fn apply(
     let mut gain = 0;
     for c in conds {
         let (x, y) = (bits.index[&(c.i, c.a)], bits.index[&(c.j, c.b)]);
-        for dv in 0..32 {
+        for (dv, start) in base.iter().enumerate() {
             if c.dvs >> dv & 1 == 0 {
                 continue;
             }
-            let forest = state.entry(dv).or_insert_with(|| base[dv].clone());
+            let forest = state.entry(dv).or_insert_with(|| start.clone());
             if forest.union(x, y, c.c) {
                 gain += 1;
             }
@@ -267,7 +271,7 @@ pub fn solve(width: usize, groups: usize) -> Plan {
     let mut spent = 0;
 
     while spent < groups && covered < goal {
-        let mut best: Option<(u32, usize, Vec<Cond>, HashMap<usize, Forest>)> = None;
+        let mut best: Option<Candidate> = None;
         for run in &runs {
             let cost = run.len().div_ceil(width);
             if spent + cost > groups {

@@ -40,45 +40,43 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
         let bits: Vec<&str> = g.iter().map(|m| m.1.as_str()).collect();
 
         out.push_str("\n    {\n");
-        let _ = write!(out, "        let near = vld1q_u32(p.add({base}));\n");
-        let _ = write!(
+        let _ = writeln!(out, "        let near = vld1q_u32(p.add({base}));");
+        let _ = writeln!(
             out,
-            "        let far = vld1q_u32(p.add({}));\n",
+            "        let far = vld1q_u32(p.add({}));",
             base + f.offset
         );
-        // `vshrq_n_u32` rejects a zero shift, and no shift is needed when
-        // the bits are already aligned.
         let (shift, bit) = align(f);
         // `vshrq_n_u32` rejects a zero shift, and no shift is needed when the
         // bits are already aligned.
         if shift == 0 {
             out.push_str("        let x = veorq_u32(near, far);\n");
         } else if shift > 0 {
-            let _ = write!(
+            let _ = writeln!(
                 out,
-                "        let x = veorq_u32(near, vshrq_n_u32(far, {shift}));\n"
+                "        let x = veorq_u32(near, vshrq_n_u32(far, {shift}));"
             );
         } else {
-            let _ = write!(
+            let _ = writeln!(
                 out,
-                "        let x = veorq_u32(vshrq_n_u32(near, {}), far);\n",
+                "        let x = veorq_u32(vshrq_n_u32(near, {}), far);",
                 -shift
             );
         }
         if f.clears_on == 1 {
-            let _ = write!(
+            let _ = writeln!(
                 out,
-                "        let hit = vtstq_u32(x, vdupq_n_u32(1 << {bit}));\n"
+                "        let hit = vtstq_u32(x, vdupq_n_u32(1 << {bit}));"
             );
         } else {
-            let _ = write!(
+            let _ = writeln!(
                 out,
-                "        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << {bit})), vdupq_n_u32(0));\n"
+                "        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << {bit})), vdupq_n_u32(0));"
             );
         }
-        let _ = write!(
+        let _ = writeln!(
             out,
-            "        let bits = vld1q_u32([{}].as_ptr());\n",
+            "        let bits = vld1q_u32([{}].as_ptr());",
             lanes(&bits, "        ", 4)
         );
         let _ = write!(

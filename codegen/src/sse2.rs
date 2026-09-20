@@ -43,40 +43,40 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
         let bits: Vec<&str> = g.iter().map(|m| m.1.as_str()).collect();
 
         out.push_str("\n    {\n");
-        let _ = write!(
+        let _ = writeln!(
             out,
-            "        let near = _mm_loadu_si128(p.add({base}).cast());\n"
+            "        let near = _mm_loadu_si128(p.add({base}).cast());"
         );
-        let _ = write!(
+        let _ = writeln!(
             out,
-            "        let far = _mm_loadu_si128(p.add({}).cast());\n",
+            "        let far = _mm_loadu_si128(p.add({}).cast());",
             base + f.offset
         );
         let (shift, bit) = align(f);
         if shift == 0 {
             out.push_str("        let x = _mm_xor_si128(near, far);\n");
         } else if shift > 0 {
-            let _ = write!(
+            let _ = writeln!(
                 out,
-                "        let x = _mm_xor_si128(near, _mm_srli_epi32(far, {shift}));\n"
+                "        let x = _mm_xor_si128(near, _mm_srli_epi32(far, {shift}));"
             );
         } else {
-            let _ = write!(
+            let _ = writeln!(
                 out,
-                "        let x = _mm_xor_si128(_mm_srli_epi32(near, {}), far);\n",
+                "        let x = _mm_xor_si128(_mm_srli_epi32(near, {}), far);",
                 -shift
             );
         }
-        let _ = write!(
+        let _ = writeln!(
             out,
-            "        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << {bit}));\n"
+            "        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << {bit}));"
         );
         out.push_str("        let miss = _mm_cmpeq_epi32(tested, zero);\n");
         let cast: Vec<String> = bits.iter().map(|b| format!("({b}) as i32")).collect();
         let cast: Vec<&str> = cast.iter().map(String::as_str).collect();
-        let _ = write!(
+        let _ = writeln!(
             out,
-            "        let bits = _mm_setr_epi32({});\n",
+            "        let bits = _mm_setr_epi32({});",
             lanes(&cast, "        ", 4)
         );
         let _ = write!(
