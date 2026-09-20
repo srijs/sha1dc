@@ -20,7 +20,7 @@ targets are `neon`, `sse2` and `avx2`, as well as a scalar baseline.
 
 Where available, the implementation also uses SHA-1 hardware instructions on
 `x86_64` and `aarch64`. Detection still does more work per block than plain
-SHA-1, and slows down hashing by 20% to 32%, depending on the machine.
+SHA-1, and slows down hashing by 20% to 35%, depending on the machine.
 
 ## Usage
 
@@ -37,14 +37,20 @@ report a detected attack as an error. The [documentation] covers both.
 ## Performance
 
 These figures compare the crate against the [`sha1`] crate, which has no
-collision detection, on an Apple M-series laptop and an EC2 c7i.xlarge:
+collision detection. The machines are an Apple M4 laptop, an EC2 c7i.xlarge
+and an EC2 c8g.xlarge. Each figure is the best of several runs.
 
 | machine              | backend             | [`sha1`]  | `sha1dc`  | ratio |
 |----------------------|---------------------|-----------|-----------|-------|
-| Apple M-series       | SHA-1 instructions  | 3008 MiB/s| 2405 MiB/s|   80% |
-| Apple M-series       | scalar              | 1343 MiB/s| 1033 MiB/s|   77% |
-| Xeon Platinum 8488C  | SHA-NI              | 1901 MiB/s| 1292 MiB/s|   68% |
-| Xeon Platinum 8488C  | scalar              |  817 MiB/s|  653 MiB/s|   80% |
+| Apple M4             | SHA-1 instructions  | 3011 MiB/s| 2425 MiB/s|   80% |
+| Apple M4             | scalar              | 1362 MiB/s|  889 MiB/s|   65% |
+| Xeon Platinum 8488C  | SHA-NI              | 1898 MiB/s| 1257 MiB/s|   66% |
+| Xeon Platinum 8488C  | scalar              |  814 MiB/s|  538 MiB/s|   66% |
+| Graviton4            | SHA-1 instructions  | 1626 MiB/s| 1113 MiB/s|   68% |
+| Graviton4            | scalar              |  701 MiB/s|  476 MiB/s|   68% |
+
+A scalar row builds the [`sha1`] crate with its own scalar backend, so that
+both columns use the same class of instructions.
 
 ## Features
 
