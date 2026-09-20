@@ -1,0 +1,513 @@
+#![no_std]
+#![warn(missing_docs, unreachable_pub)]
+
+//! SHA-1 is cryptographically broken, because chosen-prefix collisions against it are practical.
+//! However, there are still cases where it is needed for compatibility, such as in `git`'s object
+//! identifiers.
+//!
+//! To mitigate this security issue, this crate detects those manufactured collisions. It follows
+//! the method of Marc Stevens and Dan Shumow, which finds the message blocks that a collision
+//! attack produces and reports them. The [paper] describes the method, and
+//! [sha1collisiondetection] is the authors' own implementation, which the tests compare against.
+//!
+//! Where available, the implementation uses SHA-1 hardware instructions on `x86_64` and `aarch64`,
+//! as well as SIMD-enabled algorithms. Nonetheless, detection does more work per block than plain
+//! SHA-1, and slows down hashing by 20% to 32%, depending on the machine.
+//!
+//! Two modes are provided, as two separate `Hasher` structs. [`Hasher`] keeps the standard digest,
+//! with output equivalent to a non-detecting SHA-1 implementation. [`mitigate::Hasher`] computes an
+//! alternative digest instead. Both report a detected attack as an error.
+//!
+//! ## Example
+//!
+//! ```rust
+//! use sha1dc::Hasher;
+//!
+//! let mut hasher = Hasher::new();
+//! hasher.update(b"hello ");
+//! hasher.update(b"world");
+//!
+//! match hasher.finalize() {
+//!     Ok(digest) => println!("{digest}"),
+//!     Err(collision) => println!("refusing {}", collision.digest()),
+//! }
+//! ```
+//!
+//! [sha1collisiondetection]: https://github.com/cr-marcstevens/sha1collisiondetection
+//! [paper]: https://marc-stevens.nl/research/papers/C13-S.pdf
+
+#[cfg(feature = "std")]
+extern crate std;
+
+use core::fmt;
+
+pub mod mitigate;
+
+mod block;
+mod ubc_check;
+
+use block::Backend;
+
+/// Size of a SHA-1 digest in bytes.
+const DIGEST_SIZE: usize = 20;
+
+/// Size of the SHA-1 compression block in bytes.
+const BLOCK_SIZE: usize = 64;
+
+const STATE_LEN: usize = 5;
+const INITIAL_H: [u32; STATE_LEN] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
+
+/// A SHA-1 digest.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Digest([u8; DIGEST_SIZE]);
+
+impl Digest {
+    /// The digest as a byte array.
+    pub const fn as_bytes(&self) -> &[u8; DIGEST_SIZE] {
+        &self.0
+    }
+
+    /// Consumes the digest, returning the raw bytes.
+    pub const fn to_bytes(self) -> [u8; DIGEST_SIZE] {
+        self.0
+    }
+}
+
+impl AsRef<[u8]> for Digest {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl From<[u8; DIGEST_SIZE]> for Digest {
+    fn from(bytes: [u8; DIGEST_SIZE]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<Digest> for [u8; DIGEST_SIZE] {
+    fn from(digest: Digest) -> Self {
+        digest.0
+    }
+}
+
+impl PartialEq<[u8; DIGEST_SIZE]> for Digest {
+    fn eq(&self, other: &[u8; DIGEST_SIZE]) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<[u8]> for Digest {
+    fn eq(&self, other: &[u8]) -> bool {
+        self.0 == *other
+    }
+}
+
+impl fmt::LowerHex for Digest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in &self.0 {
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::UpperHex for Digest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in &self.0 {
+            write!(f, "{byte:02X}")?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for Digest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::LowerHex::fmt(self, f)
+    }
+}
+
+impl fmt::Debug for Digest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Digest({self:x})")
+    }
+}
+
+/// A collision attack was detected, and not mitigated.
+///
+/// [`Hasher::finalize`] returns this. The digest is the plain SHA-1 value, and
+/// cannot be relied upon to be collision-free.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Collision {
+    digest: Digest,
+}
+
+impl Collision {
+    /// The plain SHA-1 digest, which cannot be relied upon to be
+    /// collision-free.
+    pub const fn digest(&self) -> Digest {
+        self.digest
+    }
+}
+
+impl fmt::Display for Collision {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SHA-1 collision attack detected; digest is the colliding one")
+    }
+}
+
+impl core::error::Error for Collision {}
+
+/// Hashes `data`, reporting a detected collision attack.
+///
+/// This is the one-shot form of [`Hasher`]. The digest is plain SHA-1, so it
+/// agrees with all other implementations. To get a digest no other message
+/// shares, use [`mitigate::digest`].
+///
+/// # Examples
+///
+/// ```
+/// let digest = sha1dc::digest(b"hello world").expect("no collision");
+/// assert_eq!(digest.to_string(), "2aae6c35c94fcfb415dbe95f408b9ce91ee846ed");
+/// ```
+pub fn digest(data: &[u8]) -> Result<Digest, Collision> {
+    let mut hasher = Hasher::new();
+    hasher.update(data);
+    hasher.finalize()
+}
+
+/// State that both hashers share. They differ only in the result of a
+/// detected collision, which the builder sets.
+#[derive(Clone)]
+struct Inner {
+    h: [u32; STATE_LEN],
+    /// Total number of bytes fed in so far.
+    len: u64,
+    buffer: [u8; BLOCK_SIZE],
+    buffer_len: usize,
+    backend: Backend,
+
+    // What the detection needs. The names follow the C.
+    safe_hash: bool,
+    ubc_check: bool,
+    reduced_round_collision: bool,
+    /// True if a collision occurred.
+    found_collision: bool,
+    /// This block's input chaining value, and the one the partner block
+    /// would have.
+    ihv1: [u32; STATE_LEN],
+    ihv2: [u32; STATE_LEN],
+    /// This block's expanded message schedule, and the partner's, which is
+    /// this one XOR a DV's difference.
+    m1: [u32; 80],
+    m2: [u32; 80],
+    /// Earlier states, which make recompression faster.
+    state_58: [u32; STATE_LEN],
+    state_65: [u32; STATE_LEN],
+}
+
+impl Inner {
+    fn new(builder: Builder, safe_hash: bool) -> Self {
+        Self {
+            h: INITIAL_H,
+            len: 0,
+            buffer: [0; BLOCK_SIZE],
+            buffer_len: 0,
+            backend: if builder.scalar_backend {
+                Backend::scalar()
+            } else {
+                Backend::new()
+            },
+            safe_hash,
+            ubc_check: builder.ubc_check,
+            reduced_round_collision: builder.reduced_round_collisions,
+            found_collision: false,
+            ihv1: [0; STATE_LEN],
+            ihv2: [0; STATE_LEN],
+            m1: [0; 80],
+            m2: [0; 80],
+            state_58: [0; STATE_LEN],
+            state_65: [0; STATE_LEN],
+        }
+    }
+
+    fn update(&mut self, mut data: &[u8]) {
+        self.len = self.len.wrapping_add(data.len() as u64);
+
+        if self.buffer_len > 0 {
+            let free = BLOCK_SIZE - self.buffer_len;
+            let take = free.min(data.len());
+            self.buffer[self.buffer_len..self.buffer_len + take].copy_from_slice(&data[..take]);
+            self.buffer_len += take;
+            data = &data[take..];
+
+            if self.buffer_len < BLOCK_SIZE {
+                return;
+            }
+            let block = self.buffer;
+            self.compress(&[block]);
+            self.buffer_len = 0;
+        }
+
+        let blocks = data.len() / BLOCK_SIZE;
+        let (full, rest) = data.split_at(blocks * BLOCK_SIZE);
+        if blocks > 0 {
+            self.compress(as_blocks(full));
+        }
+        self.buffer[..rest.len()].copy_from_slice(rest);
+        self.buffer_len = rest.len();
+    }
+
+    fn reset(&mut self) {
+        self.h = INITIAL_H;
+        self.len = 0;
+        self.buffer = [0; BLOCK_SIZE];
+        self.buffer_len = 0;
+        // Keep the configuration.
+        self.found_collision = false;
+        self.ihv1 = [0; STATE_LEN];
+        self.ihv2 = [0; STATE_LEN];
+        self.m1 = [0; 80];
+        self.m2 = [0; 80];
+        self.state_58 = [0; STATE_LEN];
+        self.state_65 = [0; STATE_LEN];
+    }
+
+    /// Finishes and reports whether a collision occurred. The caller's own
+    /// type defines what a detection means for the digest.
+    fn finish(&mut self) -> (Digest, bool) {
+        let digest = self.finalize_inner();
+        (digest, self.found_collision)
+    }
+
+    fn compress(&mut self, blocks: &[[u8; BLOCK_SIZE]]) {
+        block::compress(self, blocks);
+    }
+
+    /// Pads the message and compresses the final block(s).
+    ///
+    /// This leaves the hasher in an invalid state. It consumes the buffer but
+    /// does not update `buffer_len` or `len`. Each caller must own `self` or
+    /// call [`reset`](Self::reset) immediately after.
+    fn finalize_inner(&mut self) -> Digest {
+        let bit_len = self.len << 3;
+        let pos = self.buffer_len;
+
+        self.buffer[pos] = 0x80;
+        self.buffer[pos + 1..].fill(0);
+
+        if pos + 1 > BLOCK_SIZE - 8 {
+            let block = self.buffer;
+            self.compress(&[block]);
+            self.buffer.fill(0);
+        }
+
+        self.buffer[BLOCK_SIZE - 8..].copy_from_slice(&bit_len.to_be_bytes());
+        let block = self.buffer;
+        self.compress(&[block]);
+
+        let mut out = [0u8; DIGEST_SIZE];
+        for (chunk, v) in out.chunks_exact_mut(4).zip(self.h.iter()) {
+            chunk.copy_from_slice(&v.to_be_bytes());
+        }
+        Digest(out)
+    }
+}
+
+/// SHA-1 hasher that detects a collision attack without changing the digest.
+///
+/// Digests match all other SHA-1 implementations, which is what a shared
+/// identifier needs. A detected attack gives a [`Collision`], whose digest
+/// applies to two messages. Refuse that digest.
+///
+/// Use this mode unless you know that you need the other one.
+/// [`mitigate::Hasher`] applies when you must produce a usable digest during
+/// an attack.
+///
+/// Detection is always on. For plain SHA-1 without detection, use the `sha1`
+/// crate.
+#[derive(Clone)]
+pub struct Hasher(Inner);
+
+impl Default for Hasher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Generates the methods that both hashers share. Only the result type of
+/// `finalize` differs.
+macro_rules! hasher_common {
+    ($ty:ident, $err:ident, $detected:expr) => {
+        impl fmt::Debug for $ty {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_struct(stringify!($ty))
+                    .field("collision_detected", &self.collision_detected())
+                    .finish_non_exhaustive()
+            }
+        }
+
+        impl $ty {
+            /// Feeds more data into the hasher.
+            pub fn update(&mut self, data: &[u8]) {
+                self.0.update(data);
+            }
+
+            /// Finishes hashing, reporting a detected collision attack.
+            pub fn finalize(mut self) -> Result<Digest, $err> {
+                let (digest, detected) = self.0.finish();
+                if detected {
+                    Err($detected(digest))
+                } else {
+                    Ok(digest)
+                }
+            }
+
+            /// Finishes hashing and resets the hasher, reporting a detected
+            /// collision attack.
+            pub fn finalize_reset(&mut self) -> Result<Digest, $err> {
+                let (digest, detected) = self.0.finish();
+                self.0.reset();
+                if detected {
+                    Err($detected(digest))
+                } else {
+                    Ok(digest)
+                }
+            }
+
+            /// Resets the hasher to its initial state.
+            pub fn reset(&mut self) {
+                self.0.reset();
+            }
+
+            /// True if a collision attack occurred in the data so far.
+            ///
+            /// Finalization hashes the last block, so this can become true
+            /// at that point.
+            pub const fn collision_detected(&self) -> bool {
+                self.0.found_collision
+            }
+        }
+
+        #[cfg(feature = "std")]
+        impl std::io::Write for $ty {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.update(buf);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+    };
+}
+
+pub(crate) use hasher_common;
+
+hasher_common!(Hasher, Collision, |digest| Collision { digest });
+
+impl Hasher {
+    /// Creates a hasher.
+    pub fn new() -> Self {
+        Builder::new().build()
+    }
+
+    /// Creates a [`Builder`].
+    ///
+    /// **Not public API. Exempt from semver.** The choice of hasher decides
+    /// everything a caller needs. The rest is for this crate's tests.
+    #[doc(hidden)]
+    pub fn builder() -> Builder {
+        Builder::new()
+    }
+}
+
+/// Reinterprets a slice whose length is a multiple of `BLOCK_SIZE` as blocks.
+#[inline]
+fn as_blocks(data: &[u8]) -> &[[u8; BLOCK_SIZE]] {
+    debug_assert_eq!(data.len() % BLOCK_SIZE, 0);
+    // SAFETY: `[u8; BLOCK_SIZE]` has the same alignment as `u8` and the size of
+    // `BLOCK_SIZE` contiguous `u8`s, and `data` holds an exact number of them.
+    unsafe { core::slice::from_raw_parts(data.as_ptr().cast(), data.len() / BLOCK_SIZE) }
+}
+
+/// Configures a hasher's collision detection.
+///
+/// **Not public API. Exempt from semver.** See [`Hasher::builder`].
+#[doc(hidden)]
+#[derive(Clone, Debug)]
+pub struct Builder {
+    scalar_backend: bool,
+    ubc_check: bool,
+    reduced_round_collisions: bool,
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Builder {
+    /// Creates a builder with the default configuration. It reports only the
+    /// collisions that are a threat to full SHA-1.
+    pub const fn new() -> Self {
+        Self {
+            scalar_backend: false,
+            ubc_check: true,
+            reduced_round_collisions: false,
+        }
+    }
+
+    /// Whether unavoidable bit conditions are used to speed up detection.
+    /// Default: `true`.
+    ///
+    /// **Not public API. Exempt from semver.** This is an optimization. It
+    /// rejects most blocks without recompression and cannot change the result.
+    /// Disabling it makes hashing tens of times slower. Tests use it to
+    /// cross-check the filter.
+    #[doc(hidden)]
+    pub const fn internal_use_ubc(mut self, use_ubc: bool) -> Self {
+        self.ubc_check = use_ubc;
+        self
+    }
+
+    /// Whether collisions against reduced-round SHA-1 also count as detected
+    /// collisions. Default: `false`.
+    ///
+    /// **Not public API. Exempt from semver.** These collisions are not a
+    /// threat to full SHA-1, so this setting only causes false positives.
+    /// Tests use it, because a reduced-round collision is cheap to make.
+    #[doc(hidden)]
+    pub const fn internal_reduced_round_collisions(mut self, reduced: bool) -> Self {
+        self.reduced_round_collisions = reduced;
+        self
+    }
+
+    /// Sets the hasher to use the scalar implementation and not the CPU
+    /// SHA-1 instructions.
+    ///
+    /// **Not public API. Exempt from semver.** Tests and the benchmark use it
+    /// to run the scalar path on a machine that has the instructions. Without
+    /// it, that path runs only where the instructions are absent.
+    #[doc(hidden)]
+    pub const fn internal_scalar_backend(mut self) -> Self {
+        self.scalar_backend = true;
+        self
+    }
+
+    /// Builds a hasher that does not change the digest.
+    pub fn build(self) -> Hasher {
+        Hasher(self.inner(false))
+    }
+
+    /// Builds a hasher that mitigates a detected attack.
+    pub fn build_mitigating(self) -> mitigate::Hasher {
+        mitigate::Hasher(self.inner(true))
+    }
+
+    fn inner(self, safe_hash: bool) -> Inner {
+        Inner::new(self, safe_hash)
+    }
+}

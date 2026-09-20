@@ -1,0 +1,32 @@
+[workspace]
+members = ["codegen"]
+
+[package]
+name = "sha1dc"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Hardware-accelerated SHA-1 with collision detection"
+documentation = "https://docs.rs/sha1dc"
+repository = "https://github.com/srijs/sha1dc"
+license = "MIT OR Apache-2.0"
+keywords = ["sha1", "hash", "collision", "shattered"]
+categories = ["cryptography", "no-std"]
+exclude = [
+    "tests/data/shattered-1.pdf",
+    "tests/data/shattered-2.pdf",
+]
+
+[dependencies]
+
+[dev-dependencies]
+hex-literal = "1"
+sha1 = "0.11"
+
+[features]
+default = ["std"]
+std = []
+
+[[bench]]
+name = "throughput"
+harness = false
