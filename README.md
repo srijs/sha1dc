@@ -8,16 +8,20 @@ SHA-1 is cryptographically broken, because chosen-prefix collisions against it
 are practical. However, there are still cases where it is needed for
 compatibility, such as in `git`'s object identifiers.
 
-To mitigate this security issue, this crate detects those manufactured
-collisions. It follows the method of Marc Stevens and Dan Shumow, which finds
-the message blocks that a collision attack produces and reports them. The
-[paper] describes the method, and [sha1collisiondetection] is the authors' own
-implementation, which the tests compare against.
+This security issue can be mitigated by detecting those manufactured collisions.
+This crate follows the method of Marc Stevens and Dan Shumow, which finds the
+message blocks that a collision attack produces and reports them ([paper]).
 
-Where available, the implementation uses SHA-1 hardware instructions on `x86_64`
-and `aarch64`, as well as SIMD-enabled algorithms. Nonetheless, detection does
-more work per block than plain SHA-1, and slows down hashing by 20% to 32%,
-depending on the machine.
+To implement filtering for known disturbance vectors, it follows a code
+generation approach. Each condition for an attack is a linear equation over two
+bits of the expanded message. A solver searches the space they span for a set
+of equations that suits vector execution, and then emits code for each
+instruction set. Currently supported are `sse2`, `avx2`, `neon` as well as a
+scalar baseline.
+
+Where available, the implementation also uses SHA-1 hardware instructions on
+`x86_64` and `aarch64`. Detection still does more work per block than plain
+SHA-1, and slows down hashing by 20% to 32%, depending on the machine.
 
 ## Usage
 
@@ -59,7 +63,6 @@ Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in this project by you, as defined in the Apache-2.0 license,
 shall be dual licensed as above, without any additional terms or conditions.
 
-[sha1collisiondetection]: https://github.com/cr-marcstevens/sha1collisiondetection
 [paper]: https://marc-stevens.nl/research/papers/C13-S.pdf
 [`sha1`]: https://crates.io/crates/sha1
 [documentation]: https://docs.rs/sha1dc
