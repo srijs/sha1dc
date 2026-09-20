@@ -233,6 +233,74 @@ mod tests {
         }
     }
 
+    /// Property tests. The loops above run a fixed stream; these look for a
+    /// disagreement anywhere and shrink a failure to a small case.
+    ///
+    /// `quickcheck` needs `std`, so a `no_std` build skips them.
+    #[cfg(feature = "std")]
+    mod properties {
+        use super::*;
+        use quickcheck::QuickCheck;
+
+        /// The hardware backend and the scalar one must produce the same
+        /// digest state and the same schedule for any block and any starting
+        /// state, not only for a real message.
+        #[test]
+        fn hardware_agrees_with_scalar_on_any_block() {
+            if !is_hardware(&Backend::new()) {
+                return;
+            }
+
+            fn prop(block: [u8; BLOCK_SIZE], ihv: [u32; 5]) -> bool {
+                let (mut hw_state, mut hw_w) = (ihv, [0u32; 80]);
+                let (mut hw_s58, mut hw_s65) = ([0u32; 5], [0u32; 5]);
+                Backend::new().compress_spill(
+                    &mut hw_state,
+                    &block,
+                    &mut hw_w,
+                    &mut hw_s58,
+                    &mut hw_s65,
+                );
+
+                let (mut sc_state, mut sc_w) = (ihv, [0u32; 80]);
+                let (mut s58, mut s65) = ([0u32; 5], [0u32; 5]);
+                Backend(Repr::Scalar).compress_spill(
+                    &mut sc_state,
+                    &block,
+                    &mut sc_w,
+                    &mut s58,
+                    &mut s65,
+                );
+
+                hw_state == sc_state && hw_w == sc_w
+            }
+
+            QuickCheck::new()
+                .tests(1_000)
+                .quickcheck(prop as fn([u8; BLOCK_SIZE], [u32; 5]) -> bool);
+        }
+
+        /// `states_from_w` must match a full scalar run for any schedule the
+        /// hardware path can leave behind.
+        #[test]
+        fn states_from_w_agrees_on_any_block() {
+            fn prop(m: [u32; 16], ihv: [u32; 5]) -> bool {
+                let mut replayed = ihv;
+                let (mut w, mut want_58, mut want_65) = ([0u32; 80], [0u32; 5], [0u32; 5]);
+                scalar::compress_spill(&mut replayed, &m, &mut w, &mut want_58, &mut want_65);
+
+                let (mut got_58, mut got_65) = ([0u32; 5], [0u32; 5]);
+                rounds::states_from_w(&ihv, &w, &mut got_58, &mut got_65);
+
+                got_58 == want_58 && got_65 == want_65
+            }
+
+            QuickCheck::new()
+                .tests(1_000)
+                .quickcheck(prop as fn([u32; 16], [u32; 5]) -> bool);
+        }
+    }
+
     /// `states_from_w` replaces a full scalar run on the hardware path, so it
     /// must give the same result.
     #[test]

@@ -347,30 +347,60 @@ mod tests {
         }
     }
 
+    /// Names the form that disagrees with [`scalar::check`] on `w`, if one
+    /// does. Only the forms that this build has are run.
+    fn diverging_form(w: &[u32; 80]) -> Option<&'static str> {
+        let want = scalar::check(w);
+
+        #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+        // SAFETY: the cfg guarantees `neon`.
+        if unsafe { neon::check(w) } != want {
+            return Some("neon");
+        }
+
+        #[cfg(all(
+            any(target_arch = "x86", target_arch = "x86_64"),
+            target_feature = "sse2"
+        ))]
+        // SAFETY: the cfg guarantees `sse2`.
+        if unsafe { sse2::check(w) } != want {
+            return Some("sse2");
+        }
+
+        #[cfg(all(
+            any(target_arch = "x86", target_arch = "x86_64"),
+            target_feature = "sse2",
+            any(feature = "std", target_feature = "avx2")
+        ))]
+        if has_avx2() {
+            // SAFETY: just detected.
+            if unsafe { avx2::check(w) } != want {
+                return Some("avx2");
+            }
+        }
+
+        None
+    }
+
+    /// Expands 16 words the way SHA-1 does, so that the schedule is one a
+    /// message can produce.
+    fn expand(m: &[u32; 16]) -> [u32; 80] {
+        let mut w = [0u32; 80];
+        w[..16].copy_from_slice(m);
+        for t in 16..80 {
+            w[t] = (w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]).rotate_left(1);
+        }
+        w
+    }
+
     /// Every target solves for its own plan, so the forms share no code. They
     /// must still agree: a check that clears too few bits gives correct
     /// digests and only causes more recompressions, so no other test sees it.
     #[test]
     fn every_form_matches_scalar() {
         schedules(20_000, |w| {
-            let want = scalar::check(w);
-            #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-            // SAFETY: the cfg guarantees `neon`.
-            assert_eq!(unsafe { neon::check(w) }, want, "neon diverged");
-            #[cfg(all(
-                any(target_arch = "x86", target_arch = "x86_64"),
-                target_feature = "sse2"
-            ))]
-            // SAFETY: the cfg guarantees `sse2`.
-            assert_eq!(unsafe { sse2::check(w) }, want, "sse2 diverged");
-            #[cfg(all(
-                any(target_arch = "x86", target_arch = "x86_64"),
-                target_feature = "sse2",
-                any(feature = "std", target_feature = "avx2")
-            ))]
-            if has_avx2() {
-                // SAFETY: just detected.
-                assert_eq!(unsafe { avx2::check(w) }, want, "avx2 diverged");
+            if let Some(form) = diverging_form(w) {
+                panic!("{form} diverged");
             }
         });
     }
@@ -426,5 +456,56 @@ mod tests {
 
         assert_eq!(nonzero, C_NONZERO, "flagged-block count diverged from C");
         assert_eq!(checksum, C_CHECKSUM, "mask stream diverged from C");
+    }
+
+    /// Property tests, which complement the fixed streams above. Those pin
+    /// the behaviour against the C original at an exact set of inputs. These
+    /// look for a disagreement anywhere, and shrink a failure to a small
+    /// case.
+    ///
+    /// `quickcheck` needs `std`, so a `no_std` build skips them.
+    #[cfg(feature = "std")]
+    mod properties {
+        use super::*;
+        use quickcheck::QuickCheck;
+
+        /// The forms share no code, so they must agree on any words at all,
+        /// not only on a real expansion. An expansion correlates its words,
+        /// which can hide a form that reads the wrong one.
+        #[test]
+        fn forms_agree_on_arbitrary_words() {
+            fn prop(w: [u32; 80]) -> bool {
+                diverging_form(&w).is_none()
+            }
+            QuickCheck::new()
+                .tests(2_000)
+                .quickcheck(prop as fn([u32; 80]) -> bool);
+        }
+
+        /// The same, over schedules that a message can produce. This is the
+        /// distribution the check meets in use.
+        #[test]
+        fn forms_agree_on_expanded_schedules() {
+            fn prop(m: [u32; 16]) -> bool {
+                diverging_form(&expand(&m)).is_none()
+            }
+            QuickCheck::new()
+                .tests(2_000)
+                .quickcheck(prop as fn([u32; 16]) -> bool);
+        }
+
+        /// Turning off the vector forms must not change the answer. This is
+        /// the switch that `internal_scalar_backend` sets, and only a
+        /// property test reaches both sides of it on the same input.
+        #[test]
+        fn scalar_only_gives_the_same_mask() {
+            fn prop(m: [u32; 16]) -> bool {
+                let w = expand(&m);
+                ubc_check(&w, true) == ubc_check(&w, false)
+            }
+            QuickCheck::new()
+                .tests(2_000)
+                .quickcheck(prop as fn([u32; 16]) -> bool);
+        }
     }
 }
