@@ -33,6 +33,7 @@ mod emit;
 mod neon;
 mod scalar;
 mod solve;
+mod sse2;
 mod tail;
 mod ubc;
 
@@ -92,6 +93,7 @@ fn main() -> std::io::Result<()> {
     for (name, contents) in [
         ("prefix/scalar.rs", scalar::emit(&plan)),
         ("prefix/neon.rs", neon::emit(&plan)),
+        ("prefix/sse2.rs", sse2::emit(&plan)),
         ("tail.rs", tail::emit(&plan)),
     ] {
         let path = out.join(name);
