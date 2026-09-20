@@ -1,6 +1,8 @@
 //! SHA-1 block compression, and the recompression that detection needs.
 //!
-//! [`recompression_step`] is the detection itself and [`compression_w`] is
+//! Everything here runs whatever backend is in use. [`states_from_w`]
+//! recovers the states a hardware backend does not spill,
+//! [`recompression_step`] is the detection itself, and [`compression_w`] is
 //! the mitigation. The steps themselves are also the scalar backend, in
 //! [`super::backend::scalar`].
 //!
@@ -200,6 +202,47 @@ pub(crate) fn compression_w(ihv: &mut [u32; 5], w: &[u32; 80]) {
     five!(parity, K[3], a, b, c, d, e, w, 75);
 
     add(ihv, [a, b, c, d, e]);
+}
+
+/// Recovers the two stored states from a schedule that is already expanded.
+///
+/// The hardware backends give the schedule but not the states. This runs the
+/// 65 steps that lead to them, and no more, so it is cheaper than repeating
+/// the whole compression.
+pub(crate) fn states_from_w(
+    ihv: &[u32; 5],
+    w: &[u32; 80],
+    state_58: &mut [u32; 5],
+    state_65: &mut [u32; 5],
+) {
+    let [mut a, mut b, mut c, mut d, mut e] = *ihv;
+
+    five!(ch, K[0], a, b, c, d, e, w, 0);
+    five!(ch, K[0], a, b, c, d, e, w, 5);
+    five!(ch, K[0], a, b, c, d, e, w, 10);
+    five!(ch, K[0], a, b, c, d, e, w, 15);
+
+    five!(parity, K[1], a, b, c, d, e, w, 20);
+    five!(parity, K[1], a, b, c, d, e, w, 25);
+    five!(parity, K[1], a, b, c, d, e, w, 30);
+    five!(parity, K[1], a, b, c, d, e, w, 35);
+
+    five!(maj, K[2], a, b, c, d, e, w, 40);
+    five!(maj, K[2], a, b, c, d, e, w, 45);
+    five!(maj, K[2], a, b, c, d, e, w, 50);
+
+    // Step 58 falls three into a turn of the names, so that turn is written
+    // out a step at a time. Step 65 falls on a turn, so the names are already
+    // in order there.
+    step!(maj, K[2], a, b, c, d, e, w[55]);
+    step!(maj, K[2], e, a, b, c, d, w[56]);
+    step!(maj, K[2], d, e, a, b, c, w[57]);
+    *state_58 = [c, d, e, a, b];
+    step!(maj, K[2], c, d, e, a, b, w[58]);
+    step!(maj, K[2], b, c, d, e, a, w[59]);
+
+    five!(parity, K[3], a, b, c, d, e, w, 60);
+    *state_65 = [a, b, c, d, e];
 }
 
 /// Steps 39 down to 0, from the state at step 40. Each caller undoes its own

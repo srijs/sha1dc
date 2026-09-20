@@ -47,7 +47,7 @@ pub(crate) fn compress(ctx: &mut Inner, blocks: &[[u8; BLOCK_SIZE]]) {
             !0
         };
 
-        if candidates != 0 && attacked(ctx.h, ctx, candidates) {
+        if candidates != 0 && attacked(backend, ctx.h, ctx, candidates) {
             ctx.found_collision = true;
 
             // Mitigation. Two more compressions of this block give a digest
@@ -75,7 +75,19 @@ fn xor(a: &[u32; 5], b: &[u32; 5]) -> u32 {
 /// compression function backwards from there gives the chaining value the
 /// partner starts from, and running it forwards gives the one it ends on. A
 /// collision attack needs that end to meet this block's.
-fn attacked(chaining_out: [u32; 5], ctx: &mut Inner, candidates: u32) -> bool {
+fn attacked(backend: Backend, chaining_out: [u32; 5], ctx: &mut Inner, candidates: u32) -> bool {
+    // The hardware backends give the schedule but not the states that
+    // recompression starts from, so they are recovered here, once, and only
+    // for a block that has a candidate at all.
+    let Inner {
+        ihv1,
+        m1,
+        state_58,
+        state_65,
+        ..
+    } = ctx;
+    backend.ensure_states(ihv1, m1, state_58, state_65);
+
     for dv in &crate::ubc_check::SHA1_DVS {
         if candidates & (1 << dv.mask_bit) == 0 {
             continue;
