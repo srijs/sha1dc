@@ -2,9 +2,9 @@
 //!
 //! # Why this exists
 //!
-//! The check is most of the cost of detection, and it has a form per
-//! instruction set as well as a scalar reference. Hand-written copies can go
-//! out of step. The result is a mask that clears too few bits: digests stay correct,
+//! The check is most of the cost of detection, and it has four forms: one per
+//! instruction set, plus a scalar reference. Hand-written copies can go out of
+//! step. The result is a mask that clears too few bits: digests stay correct,
 //! tests pass, and throughput halves because more blocks recompress. Every
 //! form comes from one table, in [`ubc`].
 //!
@@ -29,6 +29,7 @@
 //! scalar one. `matches_c_reference` compares the whole check against the
 //! original C. `codegen/check.sh` fails if the committed files are stale.
 
+mod avx2;
 mod emit;
 mod neon;
 mod scalar;
@@ -94,6 +95,7 @@ fn main() -> std::io::Result<()> {
         ("prefix/scalar.rs", scalar::emit(&plan)),
         ("prefix/neon.rs", neon::emit(&plan)),
         ("prefix/sse2.rs", sse2::emit(&plan)),
+        ("prefix/avx2.rs", avx2::emit(&plan)),
         ("tail.rs", tail::emit(&plan)),
     ] {
         let path = out.join(name);

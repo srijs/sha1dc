@@ -14,7 +14,7 @@ env -u SHA1DC_PREFIX_GROUPS \
     cargo run --quiet --manifest-path "$root/codegen/Cargo.toml" -- "$fresh" > /dev/null
 
 stale=""
-for f in prefix/scalar tail; do
+for f in prefix/scalar prefix/neon prefix/sse2 prefix/avx2 tail; do
     rustfmt --edition 2024 "$fresh/$f.rs"
     if ! diff -u "$root/src/ubc_check/$f.rs" "$fresh/$f.rs"; then
         stale="$stale $f.rs"
