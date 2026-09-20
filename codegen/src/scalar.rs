@@ -1,11 +1,9 @@
 //! Emits the scalar form. The vector forms must match it.
 //!
 //! One statement per check, directly from the table. It runs on a target that
-//! has neither instruction set, and `vectorized_prefix_matches_scalar`
+//! has neither instruction set, and `every_form_matches_scalar`
 //! compares against it. This form is generated and not hand-written, because
 //! that comparison only has a meaning if all three forms come from one table.
-//!
-//! The `dead_code` allow is for a target that selects a vector form.
 
 use std::fmt::Write as _;
 

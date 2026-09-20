@@ -19,18 +19,11 @@ pub fn emit(plan: &Plan) -> String {
     let mut out = String::new();
 
     let preamble = r#"
-/// # Safety
+/// The checks that run on every block. Requires `sse2`.
 ///
-/// Requires `sse2`. Every load stays in `w`. The highest index read is {HIGH}.
+/// The highest index read is {HIGH}, and every load proves its own bound.
 #[target_feature(enable = "sse2")]
-#[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn prefix(w: &[u32; 80]) -> u32 {
-    #[cfg(target_arch = "x86")]
-    use core::arch::x86::*;
-    #[cfg(target_arch = "x86_64")]
-    use core::arch::x86_64::*;
-
-    let p = w.as_ptr();
+fn prefix(w: &[u32; 80]) -> u32 {
     let zero = _mm_setzero_si128();
     let mut acc0 = zero;
     let mut acc1 = zero;
@@ -43,15 +36,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
         let bits: Vec<&str> = g.iter().map(|m| m.1.as_str()).collect();
 
         out.push_str("\n    {\n");
-        let _ = writeln!(
-            out,
-            "        let near = _mm_loadu_si128(p.add({base}).cast());"
-        );
-        let _ = writeln!(
-            out,
-            "        let far = _mm_loadu_si128(p.add({}).cast());",
-            base + f.offset
-        );
+        let _ = writeln!(out, "        let near = load::<{base}>(w);");
+        let _ = writeln!(out, "        let far = load::<{}>(w);", base + f.offset);
         let (shift, bit) = align(f);
         if shift == 0 {
             out.push_str("        let x = _mm_xor_si128(near, far);\n");

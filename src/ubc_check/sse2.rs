@@ -6,14 +6,25 @@
 
 use crate::ubc_check::*;
 
-/// Runs the whole check.
-///
-/// # Safety
-///
-/// Requires `sse2`. All reads stay in `w`.
+#[cfg(target_arch = "x86")]
+use core::arch::x86::*;
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64::*;
+
+/// The 4 schedule words starting at `I`.
+#[inline]
 #[target_feature(enable = "sse2")]
-#[allow(unsafe_op_in_unsafe_fn)]
-pub(super) unsafe fn check(w: &[u32; 80]) -> u32 {
+fn load<const I: usize>(w: &[u32; 80]) -> __m128i {
+    const { assert!(I + 4 <= 80, "a group reads past the schedule") }
+    // SAFETY: the const assert above proves `w[I..I + 4]` is in bounds,
+    // which is the whole of what this reads.
+    unsafe { _mm_loadu_si128(w.as_ptr().add(I).cast()) }
+}
+
+/// Runs the whole check. Requires `sse2`, so a caller that cannot
+/// prove the feature needs an `unsafe` block.
+#[target_feature(enable = "sse2")]
+pub(super) fn check(w: &[u32; 80]) -> u32 {
     let mask = prefix(w);
 
     // Every check only clears bits, so an empty mask settles the answer.
@@ -24,25 +35,18 @@ pub(super) unsafe fn check(w: &[u32; 80]) -> u32 {
     tail(w, mask)
 }
 
-/// # Safety
+/// The checks that run on every block. Requires `sse2`.
 ///
-/// Requires `sse2`. Every load stays in `w`. The highest index read is 56.
+/// The highest index read is 56, and every load proves its own bound.
 #[target_feature(enable = "sse2")]
-#[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn prefix(w: &[u32; 80]) -> u32 {
-    #[cfg(target_arch = "x86")]
-    use core::arch::x86::*;
-    #[cfg(target_arch = "x86_64")]
-    use core::arch::x86_64::*;
-
-    let p = w.as_ptr();
+fn prefix(w: &[u32; 80]) -> u32 {
     let zero = _mm_setzero_si128();
     let mut acc0 = zero;
     let mut acc1 = zero;
 
     {
-        let near = _mm_loadu_si128(p.add(35).cast());
-        let far = _mm_loadu_si128(p.add(36).cast());
+        let near = load::<35>(w);
+        let far = load::<36>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 5));
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 1));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -56,8 +60,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(36).cast());
-        let far = _mm_loadu_si128(p.add(37).cast());
+        let near = load::<36>(w);
+        let far = load::<37>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 5));
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 0));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -71,8 +75,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(38).cast());
-        let far = _mm_loadu_si128(p.add(39).cast());
+        let near = load::<38>(w);
+        let far = load::<39>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 5));
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 1));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -86,8 +90,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(39).cast());
-        let far = _mm_loadu_si128(p.add(40).cast());
+        let near = load::<39>(w);
+        let far = load::<40>(w);
         let x = _mm_xor_si128(_mm_srli_epi32(near, 5), far);
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 1));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -101,8 +105,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(39).cast());
-        let far = _mm_loadu_si128(p.add(40).cast());
+        let near = load::<39>(w);
+        let far = load::<40>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -116,8 +120,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(38).cast());
-        let far = _mm_loadu_si128(p.add(41).cast());
+        let near = load::<38>(w);
+        let far = load::<41>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -139,8 +143,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(40).cast());
-        let far = _mm_loadu_si128(p.add(41).cast());
+        let near = load::<40>(w);
+        let far = load::<41>(w);
         let x = _mm_xor_si128(near, far);
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 29));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -166,8 +170,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(40).cast());
-        let far = _mm_loadu_si128(p.add(43).cast());
+        let near = load::<40>(w);
+        let far = load::<43>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -197,8 +201,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(42).cast());
-        let far = _mm_loadu_si128(p.add(44).cast());
+        let near = load::<42>(w);
+        let far = load::<44>(w);
         let x = _mm_xor_si128(near, far);
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 6));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -212,8 +216,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(44).cast());
-        let far = _mm_loadu_si128(p.add(45).cast());
+        let near = load::<44>(w);
+        let far = load::<45>(w);
         let x = _mm_xor_si128(near, far);
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 29));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -248,8 +252,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(44).cast());
-        let far = _mm_loadu_si128(p.add(45).cast());
+        let near = load::<44>(w);
+        let far = load::<45>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 5));
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 1));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -263,8 +267,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(45).cast());
-        let far = _mm_loadu_si128(p.add(46).cast());
+        let near = load::<45>(w);
+        let far = load::<46>(w);
         let x = _mm_xor_si128(_mm_srli_epi32(near, 5), far);
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 1));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -278,8 +282,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(44).cast());
-        let far = _mm_loadu_si128(p.add(47).cast());
+        let near = load::<44>(w);
+        let far = load::<47>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -313,8 +317,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(46).cast());
-        let far = _mm_loadu_si128(p.add(48).cast());
+        let near = load::<46>(w);
+        let far = load::<48>(w);
         let x = _mm_xor_si128(near, far);
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 6));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -328,8 +332,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(48).cast());
-        let far = _mm_loadu_si128(p.add(49).cast());
+        let near = load::<48>(w);
+        let far = load::<49>(w);
         let x = _mm_xor_si128(near, far);
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 29));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -354,8 +358,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(48).cast());
-        let far = _mm_loadu_si128(p.add(51).cast());
+        let near = load::<48>(w);
+        let far = load::<51>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
         let miss = _mm_cmpeq_epi32(tested, zero);
@@ -372,8 +376,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
     }
 
     {
-        let near = _mm_loadu_si128(p.add(52).cast());
-        let far = _mm_loadu_si128(p.add(53).cast());
+        let near = load::<52>(w);
+        let far = load::<53>(w);
         let x = _mm_xor_si128(near, far);
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 29));
         let miss = _mm_cmpeq_epi32(tested, zero);

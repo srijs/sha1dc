@@ -6,14 +6,30 @@
 
 use crate::ubc_check::*;
 
-/// Runs the whole check.
-///
-/// # Safety
-///
-/// Requires `neon`. All reads stay in `w`.
+use core::arch::aarch64::*;
+
+/// The 4 schedule words starting at `I`.
+#[inline]
 #[target_feature(enable = "neon")]
-#[allow(unsafe_op_in_unsafe_fn)]
-pub(super) unsafe fn check(w: &[u32; 80]) -> u32 {
+fn load<const I: usize>(w: &[u32; 80]) -> uint32x4_t {
+    const { assert!(I + 4 <= 80, "a group reads past the schedule") }
+    // SAFETY: the const assert above proves `w[I..I + 4]` is in bounds,
+    // which is the whole of what this reads.
+    unsafe { vld1q_u32(w.as_ptr().add(I)) }
+}
+
+/// The DV bits of a group, as a vector.
+#[inline]
+#[target_feature(enable = "neon")]
+fn splat(bits: [u32; 4]) -> uint32x4_t {
+    // SAFETY: `vld1q_u32` reads four words, the length of `bits`.
+    unsafe { vld1q_u32(bits.as_ptr()) }
+}
+
+/// Runs the whole check. Requires `neon`, so a caller that cannot
+/// prove the feature needs an `unsafe` block.
+#[target_feature(enable = "neon")]
+pub(super) fn check(w: &[u32; 80]) -> u32 {
     let mask = prefix(w);
 
     // Every check only clears bits, so an empty mask settles the answer.
@@ -24,377 +40,325 @@ pub(super) unsafe fn check(w: &[u32; 80]) -> u32 {
     tail(w, mask)
 }
 
-/// # Safety
+/// The checks that run on every block. Requires `neon`.
 ///
-/// Requires `neon`. Every load stays in `w`. The highest index read is 56.
+/// The highest index read is 56, and every load proves its own bound.
 #[target_feature(enable = "neon")]
-#[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn prefix(w: &[u32; 80]) -> u32 {
-    use core::arch::aarch64::*;
-
-    let p = w.as_ptr();
+fn prefix(w: &[u32; 80]) -> u32 {
     let mut acc0 = vdupq_n_u32(0);
     let mut acc1 = vdupq_n_u32(0);
 
     {
-        let near = vld1q_u32(p.add(35));
-        let far = vld1q_u32(p.add(36));
+        let near = load::<35>(w);
+        let far = load::<36>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 5));
         let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 1)), vdupq_n_u32(0));
-        let bits = vld1q_u32(
-            [
-                DV_I_46_2_BIT | DV_I_49_2_BIT,
-                DV_I_47_2_BIT | DV_I_50_2_BIT | DV_II_46_2_BIT,
-                DV_I_48_2_BIT | DV_I_51_2_BIT,
-                0,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_46_2_BIT | DV_I_49_2_BIT,
+            DV_I_47_2_BIT | DV_I_50_2_BIT | DV_II_46_2_BIT,
+            DV_I_48_2_BIT | DV_I_51_2_BIT,
+            0,
+        ]);
         acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(36));
-        let far = vld1q_u32(p.add(37));
+        let near = load::<36>(w);
+        let far = load::<37>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 5));
         let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 0)), vdupq_n_u32(0));
-        let bits = vld1q_u32([DV_II_49_2_BIT, DV_II_50_2_BIT, DV_II_51_2_BIT, 0].as_ptr());
+        let bits = splat([DV_II_49_2_BIT, DV_II_50_2_BIT, DV_II_51_2_BIT, 0]);
         acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(38));
-        let far = vld1q_u32(p.add(39));
+        let near = load::<38>(w);
+        let far = load::<39>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 5));
         let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 1)), vdupq_n_u32(0));
-        let bits = vld1q_u32(
-            [
-                DV_I_49_2_BIT,
-                DV_I_46_2_BIT | DV_I_50_2_BIT | DV_II_49_2_BIT,
-                DV_I_47_2_BIT | DV_I_51_2_BIT | DV_II_50_2_BIT,
-                DV_I_48_2_BIT | DV_II_46_2_BIT | DV_II_51_2_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_49_2_BIT,
+            DV_I_46_2_BIT | DV_I_50_2_BIT | DV_II_49_2_BIT,
+            DV_I_47_2_BIT | DV_I_51_2_BIT | DV_II_50_2_BIT,
+            DV_I_48_2_BIT | DV_II_46_2_BIT | DV_II_51_2_BIT,
+        ]);
         acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(39));
-        let far = vld1q_u32(p.add(40));
+        let near = load::<39>(w);
+        let far = load::<40>(w);
         let x = veorq_u32(vshrq_n_u32(near, 5), far);
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 1));
-        let bits = vld1q_u32(
-            [
-                DV_I_49_2_BIT,
-                DV_I_50_2_BIT | DV_II_49_2_BIT,
-                DV_I_51_2_BIT | DV_II_50_2_BIT,
-                DV_II_46_2_BIT | DV_II_51_2_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_49_2_BIT,
+            DV_I_50_2_BIT | DV_II_49_2_BIT,
+            DV_I_51_2_BIT | DV_II_50_2_BIT,
+            DV_II_46_2_BIT | DV_II_51_2_BIT,
+        ]);
         acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(39));
-        let far = vld1q_u32(p.add(40));
+        let near = load::<39>(w);
+        let far = load::<40>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
         let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 4)), vdupq_n_u32(0));
-        let bits = vld1q_u32(
-            [
-                DV_I_43_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT,
-                DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
-                DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT,
-                DV_I_44_0_BIT | DV_I_46_0_BIT | DV_II_56_0_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_43_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT,
+            DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
+            DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT,
+            DV_I_44_0_BIT | DV_I_46_0_BIT | DV_II_56_0_BIT,
+        ]);
         acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(38));
-        let far = vld1q_u32(p.add(41));
+        let near = load::<38>(w);
+        let far = load::<41>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
-        let bits = vld1q_u32(
-            [
-                DV_I_44_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
-                DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_49_0_BIT | DV_II_48_0_BIT | DV_II_55_0_BIT,
-                DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT,
-                DV_I_43_0_BIT
-                    | DV_I_45_0_BIT
-                    | DV_I_47_0_BIT
-                    | DV_I_51_0_BIT
-                    | DV_II_45_0_BIT
-                    | DV_II_50_0_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_44_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
+            DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_49_0_BIT | DV_II_48_0_BIT | DV_II_55_0_BIT,
+            DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT,
+            DV_I_43_0_BIT
+                | DV_I_45_0_BIT
+                | DV_I_47_0_BIT
+                | DV_I_51_0_BIT
+                | DV_II_45_0_BIT
+                | DV_II_50_0_BIT,
+        ]);
         acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(40));
-        let far = vld1q_u32(p.add(41));
+        let near = load::<40>(w);
+        let far = load::<41>(w);
         let x = veorq_u32(near, far);
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 29));
-        let bits = vld1q_u32(
-            [
-                DV_I_44_0_BIT
-                    | DV_I_47_0_BIT
-                    | DV_I_48_0_BIT
-                    | DV_II_46_0_BIT
-                    | DV_II_47_0_BIT
-                    | DV_II_56_0_BIT,
-                DV_I_45_0_BIT | DV_I_48_0_BIT | DV_I_49_0_BIT | DV_II_47_0_BIT | DV_II_48_0_BIT,
-                DV_I_46_0_BIT | DV_I_49_0_BIT | DV_I_50_0_BIT | DV_II_48_0_BIT | DV_II_49_0_BIT,
-                DV_I_47_0_BIT
-                    | DV_I_50_0_BIT
-                    | DV_I_51_0_BIT
-                    | DV_II_45_0_BIT
-                    | DV_II_49_0_BIT
-                    | DV_II_50_0_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_44_0_BIT
+                | DV_I_47_0_BIT
+                | DV_I_48_0_BIT
+                | DV_II_46_0_BIT
+                | DV_II_47_0_BIT
+                | DV_II_56_0_BIT,
+            DV_I_45_0_BIT | DV_I_48_0_BIT | DV_I_49_0_BIT | DV_II_47_0_BIT | DV_II_48_0_BIT,
+            DV_I_46_0_BIT | DV_I_49_0_BIT | DV_I_50_0_BIT | DV_II_48_0_BIT | DV_II_49_0_BIT,
+            DV_I_47_0_BIT
+                | DV_I_50_0_BIT
+                | DV_I_51_0_BIT
+                | DV_II_45_0_BIT
+                | DV_II_49_0_BIT
+                | DV_II_50_0_BIT,
+        ]);
         acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(40));
-        let far = vld1q_u32(p.add(43));
+        let near = load::<40>(w);
+        let far = load::<43>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
-        let bits = vld1q_u32(
-            [
-                DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT,
-                DV_I_43_0_BIT
-                    | DV_I_45_0_BIT
-                    | DV_I_47_0_BIT
-                    | DV_I_51_0_BIT
-                    | DV_II_45_0_BIT
-                    | DV_II_50_0_BIT,
-                DV_I_44_0_BIT
-                    | DV_I_46_0_BIT
-                    | DV_I_48_0_BIT
-                    | DV_I_52_0_BIT
-                    | DV_II_46_0_BIT
-                    | DV_II_51_0_BIT,
-                DV_I_43_0_BIT
-                    | DV_I_45_0_BIT
-                    | DV_I_47_0_BIT
-                    | DV_I_49_0_BIT
-                    | DV_II_47_0_BIT
-                    | DV_II_52_0_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT,
+            DV_I_43_0_BIT
+                | DV_I_45_0_BIT
+                | DV_I_47_0_BIT
+                | DV_I_51_0_BIT
+                | DV_II_45_0_BIT
+                | DV_II_50_0_BIT,
+            DV_I_44_0_BIT
+                | DV_I_46_0_BIT
+                | DV_I_48_0_BIT
+                | DV_I_52_0_BIT
+                | DV_II_46_0_BIT
+                | DV_II_51_0_BIT,
+            DV_I_43_0_BIT
+                | DV_I_45_0_BIT
+                | DV_I_47_0_BIT
+                | DV_I_49_0_BIT
+                | DV_II_47_0_BIT
+                | DV_II_52_0_BIT,
+        ]);
         acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(42));
-        let far = vld1q_u32(p.add(44));
+        let near = load::<42>(w);
+        let far = load::<44>(w);
         let x = veorq_u32(near, far);
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 6));
-        let bits = vld1q_u32(
-            [
-                DV_I_46_2_BIT | DV_I_48_2_BIT,
-                DV_I_47_2_BIT | DV_I_49_2_BIT,
-                DV_I_46_2_BIT | DV_I_48_2_BIT | DV_I_50_2_BIT,
-                DV_I_47_2_BIT | DV_I_49_2_BIT | DV_I_51_2_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_46_2_BIT | DV_I_48_2_BIT,
+            DV_I_47_2_BIT | DV_I_49_2_BIT,
+            DV_I_46_2_BIT | DV_I_48_2_BIT | DV_I_50_2_BIT,
+            DV_I_47_2_BIT | DV_I_49_2_BIT | DV_I_51_2_BIT,
+        ]);
         acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(44));
-        let far = vld1q_u32(p.add(45));
+        let near = load::<44>(w);
+        let far = load::<45>(w);
         let x = veorq_u32(near, far);
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 29));
-        let bits = vld1q_u32(
-            [
-                DV_I_48_0_BIT
-                    | DV_I_51_0_BIT
-                    | DV_I_52_0_BIT
-                    | DV_II_45_0_BIT
-                    | DV_II_46_0_BIT
-                    | DV_II_50_0_BIT
-                    | DV_II_51_0_BIT,
-                DV_I_49_0_BIT
-                    | DV_I_52_0_BIT
-                    | DV_II_46_0_BIT
-                    | DV_II_47_0_BIT
-                    | DV_II_51_0_BIT
-                    | DV_II_52_0_BIT,
-                DV_I_43_0_BIT
-                    | DV_I_50_0_BIT
-                    | DV_II_47_0_BIT
-                    | DV_II_48_0_BIT
-                    | DV_II_52_0_BIT
-                    | DV_II_53_0_BIT,
-                DV_I_44_0_BIT
-                    | DV_I_51_0_BIT
-                    | DV_II_48_0_BIT
-                    | DV_II_49_0_BIT
-                    | DV_II_53_0_BIT
-                    | DV_II_54_0_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_48_0_BIT
+                | DV_I_51_0_BIT
+                | DV_I_52_0_BIT
+                | DV_II_45_0_BIT
+                | DV_II_46_0_BIT
+                | DV_II_50_0_BIT
+                | DV_II_51_0_BIT,
+            DV_I_49_0_BIT
+                | DV_I_52_0_BIT
+                | DV_II_46_0_BIT
+                | DV_II_47_0_BIT
+                | DV_II_51_0_BIT
+                | DV_II_52_0_BIT,
+            DV_I_43_0_BIT
+                | DV_I_50_0_BIT
+                | DV_II_47_0_BIT
+                | DV_II_48_0_BIT
+                | DV_II_52_0_BIT
+                | DV_II_53_0_BIT,
+            DV_I_44_0_BIT
+                | DV_I_51_0_BIT
+                | DV_II_48_0_BIT
+                | DV_II_49_0_BIT
+                | DV_II_53_0_BIT
+                | DV_II_54_0_BIT,
+        ]);
         acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(44));
-        let far = vld1q_u32(p.add(45));
+        let near = load::<44>(w);
+        let far = load::<45>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 5));
         let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 1)), vdupq_n_u32(0));
-        let bits = vld1q_u32(
-            [
-                DV_I_51_2_BIT | DV_II_49_2_BIT,
-                DV_II_50_2_BIT,
-                DV_II_51_2_BIT,
-                DV_II_46_2_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_51_2_BIT | DV_II_49_2_BIT,
+            DV_II_50_2_BIT,
+            DV_II_51_2_BIT,
+            DV_II_46_2_BIT,
+        ]);
         acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(45));
-        let far = vld1q_u32(p.add(46));
+        let near = load::<45>(w);
+        let far = load::<46>(w);
         let x = veorq_u32(vshrq_n_u32(near, 5), far);
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 1));
-        let bits = vld1q_u32(
-            [
-                DV_II_49_2_BIT,
-                DV_I_46_2_BIT | DV_II_50_2_BIT,
-                DV_I_47_2_BIT | DV_II_51_2_BIT,
-                DV_I_48_2_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_II_49_2_BIT,
+            DV_I_46_2_BIT | DV_II_50_2_BIT,
+            DV_I_47_2_BIT | DV_II_51_2_BIT,
+            DV_I_48_2_BIT,
+        ]);
         acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(44));
-        let far = vld1q_u32(p.add(47));
+        let near = load::<44>(w);
+        let far = load::<47>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
-        let bits = vld1q_u32(
-            [
-                DV_I_44_0_BIT
-                    | DV_I_46_0_BIT
-                    | DV_I_48_0_BIT
-                    | DV_I_50_0_BIT
-                    | DV_II_48_0_BIT
-                    | DV_II_53_0_BIT,
-                DV_I_45_0_BIT
-                    | DV_I_47_0_BIT
-                    | DV_I_49_0_BIT
-                    | DV_I_51_0_BIT
-                    | DV_II_49_0_BIT
-                    | DV_II_54_0_BIT,
-                DV_I_46_0_BIT
-                    | DV_I_48_0_BIT
-                    | DV_I_50_0_BIT
-                    | DV_I_52_0_BIT
-                    | DV_II_50_0_BIT
-                    | DV_II_55_0_BIT,
-                DV_I_47_0_BIT
-                    | DV_I_49_0_BIT
-                    | DV_I_51_0_BIT
-                    | DV_II_45_0_BIT
-                    | DV_II_51_0_BIT
-                    | DV_II_56_0_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_44_0_BIT
+                | DV_I_46_0_BIT
+                | DV_I_48_0_BIT
+                | DV_I_50_0_BIT
+                | DV_II_48_0_BIT
+                | DV_II_53_0_BIT,
+            DV_I_45_0_BIT
+                | DV_I_47_0_BIT
+                | DV_I_49_0_BIT
+                | DV_I_51_0_BIT
+                | DV_II_49_0_BIT
+                | DV_II_54_0_BIT,
+            DV_I_46_0_BIT
+                | DV_I_48_0_BIT
+                | DV_I_50_0_BIT
+                | DV_I_52_0_BIT
+                | DV_II_50_0_BIT
+                | DV_II_55_0_BIT,
+            DV_I_47_0_BIT
+                | DV_I_49_0_BIT
+                | DV_I_51_0_BIT
+                | DV_II_45_0_BIT
+                | DV_II_51_0_BIT
+                | DV_II_56_0_BIT,
+        ]);
         acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(46));
-        let far = vld1q_u32(p.add(48));
+        let near = load::<46>(w);
+        let far = load::<48>(w);
         let x = veorq_u32(near, far);
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 6));
-        let bits = vld1q_u32(
-            [
-                DV_I_48_2_BIT | DV_I_50_2_BIT,
-                DV_I_49_2_BIT | DV_I_51_2_BIT,
-                DV_I_50_2_BIT | DV_II_46_2_BIT,
-                DV_I_51_2_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_48_2_BIT | DV_I_50_2_BIT,
+            DV_I_49_2_BIT | DV_I_51_2_BIT,
+            DV_I_50_2_BIT | DV_II_46_2_BIT,
+            DV_I_51_2_BIT,
+        ]);
         acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(48));
-        let far = vld1q_u32(p.add(49));
+        let near = load::<48>(w);
+        let far = load::<49>(w);
         let x = veorq_u32(near, far);
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 29));
-        let bits = vld1q_u32(
-            [
-                DV_I_45_0_BIT
-                    | DV_I_52_0_BIT
-                    | DV_II_49_0_BIT
-                    | DV_II_50_0_BIT
-                    | DV_II_54_0_BIT
-                    | DV_II_55_0_BIT,
-                DV_I_46_0_BIT
-                    | DV_II_45_0_BIT
-                    | DV_II_50_0_BIT
-                    | DV_II_51_0_BIT
-                    | DV_II_55_0_BIT
-                    | DV_II_56_0_BIT,
-                DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_51_0_BIT | DV_II_52_0_BIT | DV_II_56_0_BIT,
-                DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_52_0_BIT | DV_II_53_0_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_45_0_BIT
+                | DV_I_52_0_BIT
+                | DV_II_49_0_BIT
+                | DV_II_50_0_BIT
+                | DV_II_54_0_BIT
+                | DV_II_55_0_BIT,
+            DV_I_46_0_BIT
+                | DV_II_45_0_BIT
+                | DV_II_50_0_BIT
+                | DV_II_51_0_BIT
+                | DV_II_55_0_BIT
+                | DV_II_56_0_BIT,
+            DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_51_0_BIT | DV_II_52_0_BIT | DV_II_56_0_BIT,
+            DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_52_0_BIT | DV_II_53_0_BIT,
+        ]);
         acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(48));
-        let far = vld1q_u32(p.add(51));
+        let near = load::<48>(w);
+        let far = load::<51>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
-        let bits = vld1q_u32(
-            [
-                DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_52_0_BIT,
-                DV_I_49_0_BIT | DV_I_51_0_BIT | DV_II_45_0_BIT | DV_II_47_0_BIT | DV_II_53_0_BIT,
-                DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_48_0_BIT | DV_II_54_0_BIT,
-                DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_49_0_BIT | DV_II_55_0_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_52_0_BIT,
+            DV_I_49_0_BIT | DV_I_51_0_BIT | DV_II_45_0_BIT | DV_II_47_0_BIT | DV_II_53_0_BIT,
+            DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_48_0_BIT | DV_II_54_0_BIT,
+            DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_49_0_BIT | DV_II_55_0_BIT,
+        ]);
         acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
     }
 
     {
-        let near = vld1q_u32(p.add(52));
-        let far = vld1q_u32(p.add(53));
+        let near = load::<52>(w);
+        let far = load::<53>(w);
         let x = veorq_u32(near, far);
         let hit = vtstq_u32(x, vdupq_n_u32(1 << 29));
-        let bits = vld1q_u32(
-            [
-                DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT | DV_II_53_0_BIT | DV_II_54_0_BIT,
-                DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT | DV_II_54_0_BIT | DV_II_55_0_BIT,
-                DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT | DV_II_55_0_BIT | DV_II_56_0_BIT,
-                DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_51_0_BIT | DV_II_56_0_BIT,
-            ]
-            .as_ptr(),
-        );
+        let bits = splat([
+            DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT | DV_II_53_0_BIT | DV_II_54_0_BIT,
+            DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT | DV_II_54_0_BIT | DV_II_55_0_BIT,
+            DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT | DV_II_55_0_BIT | DV_II_56_0_BIT,
+            DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_51_0_BIT | DV_II_56_0_BIT,
+        ]);
         acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
     }
 

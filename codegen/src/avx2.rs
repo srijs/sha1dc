@@ -19,18 +19,11 @@ pub fn emit(plan: &Plan) -> String {
     let mut out = String::new();
 
     let preamble = r#"
-/// # Safety
+/// The checks that run on every block. Requires `avx2`.
 ///
-/// Requires `avx2`. Every load stays in `w`. The highest index read is {HIGH}.
+/// The highest index read is {HIGH}, and every load proves its own bound.
 #[target_feature(enable = "avx2")]
-#[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn prefix(w: &[u32; 80]) -> u32 {
-    #[cfg(target_arch = "x86")]
-    use core::arch::x86::*;
-    #[cfg(target_arch = "x86_64")]
-    use core::arch::x86_64::*;
-
-    let p = w.as_ptr();
+fn prefix(w: &[u32; 80]) -> u32 {
     let zero = _mm256_setzero_si256();
     let mut acc0 = zero;
     let mut acc1 = zero;
@@ -44,15 +37,8 @@ unsafe fn prefix(w: &[u32; 80]) -> u32 {
         let (shift, bit) = align(f);
 
         out.push_str("\n    {\n");
-        let _ = writeln!(
-            out,
-            "        let near = _mm256_loadu_si256(p.add({base}).cast());"
-        );
-        let _ = writeln!(
-            out,
-            "        let far = _mm256_loadu_si256(p.add({}).cast());",
-            base + f.offset
-        );
+        let _ = writeln!(out, "        let near = load::<{base}>(w);");
+        let _ = writeln!(out, "        let far = load::<{}>(w);", base + f.offset);
         if shift == 0 {
             out.push_str("        let x = _mm256_xor_si256(near, far);\n");
         } else if shift > 0 {
