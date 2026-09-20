@@ -28,7 +28,10 @@ pub(crate) fn compress(ctx: &mut Inner, blocks: &[[u8; BLOCK_SIZE]]) {
     let backend = ctx.backend;
 
     for block in blocks {
-        ctx.ihv1 = ctx.h;
+        // The input chaining value. Only a flagged block goes on to use it,
+        // and only within this iteration, so it belongs to the loop rather
+        // than to the hasher.
+        let ihv1 = ctx.h;
 
         let Inner {
             h,
@@ -47,7 +50,7 @@ pub(crate) fn compress(ctx: &mut Inner, blocks: &[[u8; BLOCK_SIZE]]) {
             !0
         };
 
-        if candidates != 0 && attacked(backend, ctx.h, ctx, candidates) {
+        if candidates != 0 && attacked(backend, ihv1, ctx.h, ctx, candidates) {
             ctx.found_collision = true;
 
             // Mitigation. Two more compressions of this block give a digest
@@ -75,25 +78,47 @@ fn xor(a: &[u32; 5], b: &[u32; 5]) -> u32 {
 /// compression function backwards from there gives the chaining value the
 /// partner starts from, and running it forwards gives the one it ends on. A
 /// collision attack needs that end to meet this block's.
-fn attacked(backend: Backend, chaining_out: [u32; 5], ctx: &mut Inner, candidates: u32) -> bool {
+///
+/// Kept out of line, so that the partner schedule below sits in this frame
+/// and not in the frame of [`compress`], which every block traverses and
+/// only one in twenty leaves for here. Inlined, `aarch64` absorbs the 320
+/// bytes into spill space it already reserves and pays nothing, but
+/// `x86_64` grows `compress` from 440 bytes of frame to 1464 and loses 4%
+/// to 8% on messages of a few dozen bytes. Out of line it is 392, under
+/// what it was before the schedule moved here at all. The call costs about
+/// a percent of bulk throughput, which is the side of the trade that a
+/// hash of a few dozen bytes never reaches.
+#[inline(never)]
+fn attacked(
+    backend: Backend,
+    ihv1: [u32; 5],
+    chaining_out: [u32; 5],
+    ctx: &mut Inner,
+    candidates: u32,
+) -> bool {
     // The hardware backends give the schedule but not the states that
     // recompression starts from, so they are recovered here, once, and only
     // for a block that has a candidate at all.
     let Inner {
-        ihv1,
         m1,
         state_58,
         state_65,
         ..
     } = ctx;
     backend.ensure_states(
-        ihv1,
+        &ihv1,
         &chaining_out,
         m1,
         candidates & crate::ubc_check::STEP58_MASK != 0,
         state_58,
         state_65,
     );
+
+    // The partner's schedule and the chaining value it starts from. Both
+    // belong to this call and not to the hasher, which never reads them
+    // again, and which nineteen blocks in twenty never get here to fill.
+    let mut m2 = [0u32; 80];
+    let mut ihv2 = [0u32; 5];
 
     // Walking the set bits visits only the candidates. Reading `mask_bit`
     // out of all 32 entries instead would touch the whole table, which is
@@ -107,23 +132,19 @@ fn attacked(backend: Backend, chaining_out: [u32; 5], ctx: &mut Inner, candidate
         let dv = &crate::ubc_check::SHA1_DVS[bit];
         debug_assert_eq!(dv.mask_bit, bit as i32, "DV table is out of order");
 
-        for (partner, (word, difference)) in ctx.m2.iter_mut().zip(ctx.m1.iter().zip(&dv.dm)) {
+        for (partner, (word, difference)) in m2.iter_mut().zip(ctx.m1.iter().zip(&dv.dm)) {
             *partner = word ^ difference;
         }
 
         let Inner {
-            ihv2,
-            m2,
-            state_58,
-            state_65,
-            ..
+            state_58, state_65, ..
         } = ctx;
         let mut ends_on = [0u32; 5];
         recompression_step(
             dv.recompress_from,
-            ihv2,
+            &mut ihv2,
             &mut ends_on,
-            m2,
+            &m2,
             match dv.recompress_from {
                 RecompressFrom::Step58 => state_58,
                 RecompressFrom::Step65 => state_65,
@@ -134,7 +155,7 @@ fn attacked(backend: Backend, chaining_out: [u32; 5], ctx: &mut Inner, candidate
         // on the way in is for the reduced-step test vectors, which are the
         // only real examples that exist for a shortened SHA-1.
         if xor(&ends_on, &chaining_out) == 0
-            || (ctx.reduced_round_collision && xor(&ctx.ihv1, &ctx.ihv2) == 0)
+            || (ctx.reduced_round_collision && xor(&ihv1, &ihv2) == 0)
         {
             return true;
         }
