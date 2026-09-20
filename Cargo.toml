@@ -1,5 +1,5 @@
 [workspace]
-members = ["codegen"]
+members = ["bench", "codegen"]
 
 [package]
 name = "sha1dc"
@@ -20,7 +20,6 @@ exclude = [
 [dependencies]
 
 [dev-dependencies]
-criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 hex-literal = "1"
 quickcheck = { version = "1", default-features = false }
 sha1 = "0.11"
@@ -28,7 +27,3 @@ sha1 = "0.11"
 [features]
 default = ["std"]
 std = []
-
-[[bench]]
-name = "throughput"
-harness = false

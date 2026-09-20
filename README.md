@@ -36,21 +36,30 @@ report a detected attack as an error. The [documentation] covers both.
 
 ## Performance
 
-These figures compare the crate against the [`sha1`] crate, which has no
-collision detection. The machines are an Apple M4 laptop, an EC2 c7i.xlarge
-and an EC2 c8g.xlarge.
+These figures compare the crate against two others: [`sha1`], which does no
+detection at all, and [`sha1-checked`], which is detects the same collisions and
+is a direct translation of the original C code to Rust. Each is at the best it
+can do on the machine. The machines are an Apple M4 laptop, an EC2 c7i.xlarge
+and an EC2 c8g.xlarge. Throughput is in MiB/s, and as a fraction of the [`sha1`]
+row.
 
-| machine              | backend             | [`sha1`]  | `sha1dc`  | ratio |
-|----------------------|---------------------|-----------|-----------|-------|
-| Apple M4             | SHA-1 instructions  | 2977 MiB/s| 2296 MiB/s|   77% |
-| Apple M4             | scalar              | 1332 MiB/s|  917 MiB/s|   69% |
-| Xeon Platinum 8488C  | SHA-NI              | 1917 MiB/s| 1289 MiB/s|   67% |
-| Xeon Platinum 8488C  | scalar              |  826 MiB/s|  544 MiB/s|   66% |
-| Graviton4            | SHA-1 instructions  | 1616 MiB/s| 1251 MiB/s|   77% |
-| Graviton4            | scalar              |  697 MiB/s|  479 MiB/s|   69% |
+| implementation               |    Apple M4 | Xeon Platinum 8488C |   Graviton4 |
+|------------------------------|------------:|--------------------:|------------:|
+| [`sha1`] 0.11.0              | 2984 (100%) |         1916 (100%) | 1617 (100%) |
+| `sha1dc` 0.1.0               |  2315 (78%) |          1284 (67%) |  1253 (77%) |
+| [`sha1-checked`] 0.11.0-rc.0 |   851 (29%) |           537 (28%) |   458 (28%) |
 
-A scalar row builds the [`sha1`] crate with its own scalar backend, so that
-both columns use the same class of instructions.
+[`sha1`] and `sha1dc` both take the SHA-1 instructions of the machine,
+SHA-NI on the Xeon and the ARMv8 ones on the M4 and the Graviton4, and
+differ in whether they detect. The `sha1dc` shortfall from 100% is therefore
+what detection costs: 22% to 33%, depending on the machine.
+
+[`sha1-checked`] being based on the original C code is portable Rust with no
+hardware path to take, so its row is lower for the detection and the missing
+instructions at once, and the instructions are the larger of the two. Built with
+none of them, this crate runs at 918, 549 and 482 MiB/s on the three machines,
+which is 2% to 8% ahead of [`sha1-checked`] rather than the 2.4x to 2.7x of the
+table.
 
 ## Features
 
@@ -70,4 +79,5 @@ shall be dual licensed as above, without any additional terms or conditions.
 
 [paper]: https://marc-stevens.nl/research/papers/C13-S.pdf
 [`sha1`]: https://crates.io/crates/sha1
+[`sha1-checked`]: https://crates.io/crates/sha1-checked
 [documentation]: https://docs.rs/sha1dc

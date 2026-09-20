@@ -1,0 +1,15 @@
+[package]
+name = "sha1dc-bench"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+sha1 = "0.11"
+sha1-checked = "0.11.0-rc.0"
+sha1dc = { path = ".." }
+
+[[bench]]
+name = "throughput"
+harness = false
