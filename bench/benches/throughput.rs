@@ -1,7 +1,14 @@
-//! Throughput benchmark, runnable on stable: `cargo bench`.
+//! Throughput benchmark, runnable on stable: `cargo bench -p sha1dc-bench`.
 //!
-//! The baseline is the `sha1` crate, so the figures give the cost of
-//! detection. They do not compare this crate against itself.
+//! Two baselines. The `sha1` crate hashes without detecting anything, so the
+//! distance to it is the cost of detection. The `sha1-checked` crate detects
+//! the same collisions this crate does, in portable Rust, so the distance to
+//! it is what the hardware backends buy.
+//!
+//! The cases pair up: `sha1dc` against `sha1-checked` is the default of each,
+//! and `sha1dc/no-ubc` against `sha1-checked/no-ubc` is each with the
+//! unavoidable-bitconditions filter turned off, which makes both run the full
+//! recompression on every block.
 //!
 //! The `sha1dc/scalar` case takes no hardware at all: neither the SHA-1
 //! instructions nor a vector form of the UBC check. To compare it against a
@@ -45,6 +52,14 @@ fn throughput(c: &mut Criterion) {
         });
     });
 
+    group.bench_function("sha1-checked", |b| {
+        b.iter(|| {
+            let mut hasher = sha1_checked::Sha1::new();
+            hasher.update(black_box(&data[..]));
+            black_box(hasher.try_finalize())
+        });
+    });
+
     group.bench_function("sha1dc/scalar", |b| {
         b.iter(|| {
             let mut hasher = sha1dc::Hasher::builder().internal_scalar_backend().build();
@@ -58,6 +73,14 @@ fn throughput(c: &mut Criterion) {
             let mut hasher = sha1dc::Hasher::builder().internal_use_ubc(false).build();
             hasher.update(black_box(&data[..]));
             black_box(hasher.finalize().expect("no collision"))
+        });
+    });
+
+    group.bench_function("sha1-checked/no-ubc", |b| {
+        b.iter(|| {
+            let mut hasher = sha1_checked::Sha1::builder().use_ubc(false).build();
+            hasher.update(black_box(&data[..]));
+            black_box(hasher.try_finalize())
         });
     });
 

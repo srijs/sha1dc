@@ -439,13 +439,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1-checked"
+version = "0.11.0-rc.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "791ea67ee2842fadd3df7482d5dcd572968573f7c2359adf2328b8d4c271de49"
+dependencies = [
+ "digest",
+ "sha1",
+]
+
+[[package]]
 name = "sha1dc"
 version = "0.1.0"
 dependencies = [
- "criterion",
  "hex-literal",
  "quickcheck",
  "sha1",
+]
+
+[[package]]
+name = "sha1dc-bench"
+version = "0.0.0"
+dependencies = [
+ "criterion",
+ "sha1",
+ "sha1-checked",
+ "sha1dc",
 ]
 
 [[package]]
