@@ -15,7 +15,7 @@ env -u SHA1DC_SCALAR_GROUPS -u SHA1DC_NEON_GROUPS \
     cargo run --quiet --manifest-path "$root/codegen/Cargo.toml" -- "$fresh" > /dev/null
 
 stale=""
-for f in scalar neon sse2 avx2; do
+for f in scalar neon sse2 avx2 conditions; do
     rustfmt --edition 2024 "$fresh/$f.rs"
     if ! diff -u "$root/src/ubc_check/$f.rs" "$fresh/$f.rs"; then
         stale="$stale $f.rs"

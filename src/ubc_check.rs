@@ -247,6 +247,9 @@ const fn build_dvs() -> [Info; 32] {
     }
     out
 }
+#[cfg(test)]
+mod conditions;
+
 mod scalar;
 
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
@@ -507,5 +510,168 @@ mod tests {
                 .tests(2_000)
                 .quickcheck(prop as fn([u32; 16]) -> bool);
         }
+    }
+    /// Builds a message that keeps a chosen DV alive all the way through the
+    /// check.
+    ///
+    /// A random schedule is a poor way to reach the tail. Every check only
+    /// clears bits, so a DV survives only when all 7 to 15 of its conditions
+    /// hold at once, which a random schedule manages between once in 128 and
+    /// once in 33,000. Over the 20,000 schedules of
+    /// [`every_form_matches_scalar`], five of the 32 DVs are never set and
+    /// eight more are set once, so the checks behind them never run.
+    ///
+    /// Searching for such a schedule is the wrong move, because the
+    /// conditions can be solved instead. Each one is a linear equation over
+    /// two bits of the expanded message, and the expansion is itself linear,
+    /// so every bit of `w` is a linear form over the 512 bits of the block.
+    /// One DV is then a system of at most 15 equations in 512 unknowns, which
+    /// leaves room to pick a different solution every time.
+    mod witness {
+        use super::conditions::CONDITIONS;
+
+        /// A linear form over the 512 message bits, one bit of `w`.
+        type Form = [u64; 8];
+
+        /// `forms[t][b]` is bit `b` of `w[t]`.
+        pub(super) type Forms = [[Form; 32]; 80];
+
+        fn xor(a: &Form, b: &Form) -> Form {
+            core::array::from_fn(|k| a[k] ^ b[k])
+        }
+
+        /// Whether the form holds an odd number of the bits set in `x`.
+        fn odd(a: &Form, x: &Form) -> u32 {
+            (0..8).fold(0, |p, k| p ^ (a[k] & x[k]).count_ones()) & 1
+        }
+
+        fn get(f: &Form, i: usize) -> u32 {
+            (f[i / 64] >> (i % 64)) as u32 & 1
+        }
+
+        /// Expands the message into linear forms, the way SHA-1 expands it
+        /// into words. Message bit `b` of word `t` is unknown `t * 32 + b`.
+        pub(super) fn forms() -> Forms {
+            let mut f: Forms = [[[0; 8]; 32]; 80];
+            for (t, word) in f.iter_mut().enumerate().take(16) {
+                for (b, form) in word.iter_mut().enumerate() {
+                    let unknown = t * 32 + b;
+                    form[unknown / 64] = 1 << (unknown % 64);
+                }
+            }
+            for t in 16..80 {
+                for b in 0..32 {
+                    // The expansion rotates left by one, so bit `b` of `w[t]`
+                    // is bit `b - 1` of the XOR of the four earlier words.
+                    let s = (b + 31) % 32;
+                    f[t][b] = core::array::from_fn(|k| {
+                        f[t - 3][s][k] ^ f[t - 8][s][k] ^ f[t - 14][s][k] ^ f[t - 16][s][k]
+                    });
+                }
+            }
+            f
+        }
+
+        /// A message whose expansion satisfies every condition of `dv`.
+        ///
+        /// `seed` picks which solution, so repeated calls explore the space
+        /// rather than repeating one witness.
+        pub(super) fn message(forms: &Forms, dv: usize, seed: &mut u64) -> [u32; 16] {
+            // At most 15 conditions name any one DV.
+            let mut rows = [([0u64; 8], 0u32); 16];
+            let mut n = 0;
+            for &(i, a, j, b, c, dvs) in &CONDITIONS {
+                if dvs >> dv & 1 == 1 {
+                    rows[n] = (
+                        xor(
+                            &forms[i as usize][a as usize],
+                            &forms[j as usize][b as usize],
+                        ),
+                        u32::from(c),
+                    );
+                    n += 1;
+                }
+            }
+
+            // Reduce so that each pivot unknown appears in one row only. Then
+            // every pivot can be set independently of the others.
+            let mut pivots = [0usize; 16];
+            let mut rank = 0;
+            for col in 0..512 {
+                let Some(found) = (rank..n).find(|&k| get(&rows[k].0, col) == 1) else {
+                    continue;
+                };
+                rows.swap(found, rank);
+                for k in 0..n {
+                    if k != rank && get(&rows[k].0, col) == 1 {
+                        let (coeff, rhs) = rows[rank];
+                        rows[k].0 = xor(&rows[k].0, &coeff);
+                        rows[k].1 ^= rhs;
+                    }
+                }
+                pivots[rank] = col;
+                rank += 1;
+                if rank == n {
+                    break;
+                }
+            }
+
+            // Every DV is satisfiable, so no row may be left demanding that
+            // an empty sum of bits is one.
+            for row in rows.iter().take(n).skip(rank) {
+                assert_eq!(row.1, 0, "conditions for DV {dv} are inconsistent");
+            }
+
+            // Take the free unknowns at random and the pivots from the rows.
+            let mut x = [0u64; 8];
+            for word in x.iter_mut() {
+                *seed ^= *seed << 13;
+                *seed ^= *seed >> 7;
+                *seed ^= *seed << 17;
+                *word = *seed;
+            }
+            for &col in pivots.iter().take(rank) {
+                x[col / 64] &= !(1 << (col % 64));
+            }
+            for k in 0..rank {
+                if odd(&rows[k].0, &x) != rows[k].1 {
+                    let col = pivots[k];
+                    x[col / 64] |= 1 << (col % 64);
+                }
+            }
+
+            core::array::from_fn(|t| (0..32).fold(0u32, |acc, b| acc | (get(&x, t * 32 + b) << b)))
+        }
+    }
+
+    /// The forms must agree where the tail actually runs.
+    ///
+    /// [`every_form_matches_scalar`] covers the prefix well and the tail
+    /// badly, because it takes schedules as they come. These are built to
+    /// reach it: every DV is kept alive, sixty-four times over, so that the
+    /// checks behind even the rarest of them run.
+    #[test]
+    fn every_form_matches_scalar_where_the_tail_runs() {
+        const PER_DV: usize = 64;
+
+        let forms = witness::forms();
+        let mut seed = 0x243f_6a88_85a3_08d3u64;
+        let mut seen = 0u32;
+
+        for dv in 0..32 {
+            for _ in 0..PER_DV {
+                let w = expand(&witness::message(&forms, dv, &mut seed));
+
+                let mask = ubc_check(&w, true);
+                assert_ne!(mask >> dv & 1, 0, "the witness for DV {dv} did not survive");
+                seen |= mask;
+
+                if let Some(form) = diverging_form(&w) {
+                    panic!("{form} diverged on a witness for DV {dv}");
+                }
+            }
+        }
+
+        assert_eq!(seen, u32::MAX, "a DV was not covered");
     }
 }

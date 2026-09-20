@@ -30,6 +30,7 @@
 //! original C. `codegen/check.sh` fails if the committed files are stale.
 
 mod avx2;
+mod conditions;
 mod emit;
 mod neon;
 mod scalar;
@@ -127,6 +128,13 @@ fn main() -> std::io::Result<()> {
         )?;
         println!("wrote {}", path.display());
     }
+
+    // Not a form of the check: the published conditions, which the tests
+    // solve to reach the checks behind a chosen DV.
+    let path = out.join("conditions.rs");
+    std::fs::write(&path, conditions::emit())?;
+    println!("wrote {}", path.display());
+
     Ok(())
 }
 
