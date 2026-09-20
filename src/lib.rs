@@ -12,7 +12,7 @@
 //!
 //! Where available, the implementation uses SHA-1 hardware instructions on `x86_64` and `aarch64`,
 //! as well as SIMD-enabled algorithms. Nonetheless, detection does more work per block than plain
-//! SHA-1, and slows down hashing by 20% to 32%, depending on the machine.
+//! SHA-1, and slows down hashing by 20% to 35%, depending on the machine.
 //!
 //! Two modes are provided, as two separate `Hasher` structs. [`Hasher`] keeps the standard digest,
 //! with output equivalent to a non-detecting SHA-1 implementation. [`mitigate::Hasher`] computes an
