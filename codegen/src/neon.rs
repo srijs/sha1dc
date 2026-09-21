@@ -24,7 +24,7 @@ pub fn emit(plan: &Plan) -> String {
 ///
 /// The highest index read is {HIGH}, and every load proves its own bound.
 #[target_feature(enable = "neon")]
-fn prefix(w: &[u32; 80]) -> u32 {
+fn prefix(w: &Schedule) -> u32 {
     let mut acc0 = vdupq_n_u32(0);
     let mut acc1 = vdupq_n_u32(0);
 "#;

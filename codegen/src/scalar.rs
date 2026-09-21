@@ -17,7 +17,7 @@ pub fn emit(plan: &Plan) -> String {
         r#"
 /// The checks that run on every block.
 #[inline(always)]
-fn prefix(w: &[u32; 80]) -> u32 {
+fn prefix(w: &Schedule) -> u32 {
     let mut mask: u32 = !0;
 "#,
     );

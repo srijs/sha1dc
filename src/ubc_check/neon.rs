@@ -4,18 +4,24 @@
 //! `codegen/src/ubc.rs`, the solver in `codegen/src/solve.rs` or this
 //! target's plan in `codegen/src/main.rs`, and re-run it.
 
+use crate::Schedule;
 use crate::ubc_check::*;
 
 use core::arch::aarch64::*;
 
-/// The 4 schedule words starting at `I`.
+/// The 4 schedule words of steps `I..I + 4`.
+///
+/// One load on either layout; [`Schedule::window`] says where it starts. A
+/// mirrored one hands back its lanes in the other order, which each group's
+/// DV bits are emitted to match.
 #[inline]
 #[target_feature(enable = "neon")]
-fn load<const I: usize>(w: &[u32; 80]) -> uint32x4_t {
+fn load<const I: usize>(w: &Schedule) -> uint32x4_t {
     const { assert!(I + 4 <= 80, "a group reads past the schedule") }
-    // SAFETY: the const assert above proves `w[I..I + 4]` is in bounds,
-    // which is the whole of what this reads.
-    unsafe { vld1q_u32(w.as_ptr().add(I)) }
+    let at = Schedule::window(I, 4);
+    // SAFETY: the const assert above proves the 4-word window is in
+    // bounds wherever this layout puts it, which is all this reads.
+    unsafe { vld1q_u32(w.words().as_ptr().add(at)) }
 }
 
 /// The DV bits of a group, as a vector.
@@ -29,7 +35,7 @@ fn splat(bits: [u32; 4]) -> uint32x4_t {
 /// Runs the whole check. Requires `neon`, so a caller that cannot
 /// prove the feature needs an `unsafe` block.
 #[target_feature(enable = "neon")]
-pub(super) fn check(w: &[u32; 80]) -> u32 {
+pub(super) fn check(w: &Schedule) -> u32 {
     let mask = prefix(w);
 
     // Every check only clears bits, so an empty mask settles the answer.
@@ -44,7 +50,7 @@ pub(super) fn check(w: &[u32; 80]) -> u32 {
 ///
 /// The highest index read is 56, and every load proves its own bound.
 #[target_feature(enable = "neon")]
-fn prefix(w: &[u32; 80]) -> u32 {
+fn prefix(w: &Schedule) -> u32 {
     let mut acc0 = vdupq_n_u32(0);
     let mut acc1 = vdupq_n_u32(0);
 
@@ -370,7 +376,7 @@ fn prefix(w: &[u32; 80]) -> u32 {
 
 /// The checks the prefix leaves. `mask` is never zero here.
 #[inline(always)]
-fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
+fn tail(w: &Schedule, mut mask: u32) -> u32 {
     if mask & (DV_I_43_0_BIT | DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT)
         != 0
     {

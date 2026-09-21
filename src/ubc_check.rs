@@ -57,6 +57,8 @@
 //! checksum of the mask stream against values taken from the C.
 //! `dv_table_matches_c` checksums the derived DV table.
 
+use crate::Schedule;
+
 const DV_I_43_0_BIT: u32 = 1 << 0;
 const DV_I_44_0_BIT: u32 = 1 << 1;
 const DV_I_45_0_BIT: u32 = 1 << 2;
@@ -312,7 +314,7 @@ fn has_avx2() -> bool {
 /// `scalar_only` keeps to [`scalar`] on a machine that has a vector unit.
 /// Tests and benchmarks use it to reach that path.
 #[inline]
-pub(crate) fn ubc_check(w: &[u32; 80], scalar_only: bool) -> u32 {
+pub(crate) fn ubc_check(w: &Schedule, scalar_only: bool) -> u32 {
     #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
     if !scalar_only {
         // SAFETY: the cfg guarantees `neon`. All reads stay in `w`.
@@ -352,15 +354,15 @@ mod tests {
 
     /// Deterministic message schedules. The generator matches the one that
     /// produced the reference constants from the C implementation.
-    fn schedules(n: usize, mut f: impl FnMut(&[u32; 80])) {
+    fn schedules(n: usize, mut f: impl FnMut(&Schedule)) {
         let mut seed = 0x1234_5678_9abc_def0u64;
         for _ in 0..n {
-            let mut w = [0u32; 80];
-            for word in w.iter_mut().take(16) {
+            let mut w = Schedule::zeroed();
+            for t in 0..16 {
                 seed ^= seed << 13;
                 seed ^= seed >> 7;
                 seed ^= seed << 17;
-                *word = seed as u32;
+                w[t] = seed as u32;
             }
             for t in 16..80 {
                 w[t] = (w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]).rotate_left(1);
@@ -371,7 +373,7 @@ mod tests {
 
     /// Names the form that disagrees with [`scalar::check`] on `w`, if one
     /// does. Only the forms that this build has are run.
-    fn diverging_form(w: &[u32; 80]) -> Option<&'static str> {
+    fn diverging_form(w: &Schedule) -> Option<&'static str> {
         let want = scalar::check(w);
 
         #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
@@ -406,9 +408,12 @@ mod tests {
 
     /// Expands 16 words the way SHA-1 does, so that the schedule is one a
     /// message can produce.
-    fn expand(m: &[u32; 16]) -> [u32; 80] {
-        let mut w = [0u32; 80];
-        w[..16].copy_from_slice(m);
+    ///
+    fn expand(m: &[u32; 16]) -> Schedule {
+        let mut w = Schedule::zeroed();
+        for (t, word) in m.iter().enumerate() {
+            w[t] = *word;
+        }
         for t in 16..80 {
             w[t] = (w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]).rotate_left(1);
         }
@@ -497,7 +502,7 @@ mod tests {
         #[test]
         fn forms_agree_on_arbitrary_words() {
             fn prop(w: [u32; 80]) -> bool {
-                diverging_form(&w).is_none()
+                diverging_form(&Schedule::from_words(w)).is_none()
             }
             QuickCheck::new()
                 .tests(2_000)

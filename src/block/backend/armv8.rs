@@ -15,6 +15,7 @@ compile_error!("the armv8 backend needs an aarch64 target");
 
 use core::arch::aarch64::*;
 
+use crate::Schedule;
 use crate::block::rounds::K;
 
 /// The four schedule words starting at `I`.
@@ -23,11 +24,11 @@ use crate::block::rounds::K;
 /// compile error at the call site rather than a promise in a comment.
 #[inline]
 #[target_feature(enable = "sha2")]
-fn spill<const I: usize>(w: &mut [u32; 80], v: uint32x4_t) {
+fn spill<const I: usize>(w: &mut Schedule, v: uint32x4_t) {
     const { assert!(I + 4 <= 80, "the spill runs past the schedule") }
     // SAFETY: the const assert above proves `w[I..I + 4]` is in bounds,
     // which is the whole of what this writes.
-    unsafe { vst1q_u32(w.as_mut_ptr().add(I), v) }
+    unsafe { vst1q_u32(w.words_mut().as_mut_ptr().add(Schedule::window(I, 4)), v) }
 }
 
 /// The four message words starting at byte `I`, in native order.
@@ -66,7 +67,7 @@ fn store_abcd(state: &mut [u32; 5], v: uint32x4_t) {
     clippy::too_many_lines,
     reason = "the block compression is one unrolled body"
 )]
-pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut [u32; 80]) {
+pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Schedule) {
     let mut abcd = load_abcd(state);
     let mut e0 = state[4];
     let abcd_in = abcd;

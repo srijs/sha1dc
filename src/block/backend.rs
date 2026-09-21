@@ -7,8 +7,8 @@
 //! [`Backend::scalar`] selects the scalar one. Tests use it to run that path
 //! on a machine that has the instructions.
 
-use crate::BLOCK_SIZE;
 use crate::block::rounds;
+use crate::{BLOCK_SIZE, Schedule};
 
 #[cfg(target_arch = "aarch64")]
 mod armv8;
@@ -91,7 +91,7 @@ impl Backend {
         &self,
         state: &mut [u32; 5],
         block: &[u8; BLOCK_SIZE],
-        m1: &mut [u32; 80],
+        m1: &mut Schedule,
         state_58: &mut [u32; 5],
         state_65: &mut [u32; 5],
     ) {
@@ -131,7 +131,7 @@ impl Backend {
         &self,
         ihv_before: &[u32; 5],
         ihv_after: &[u32; 5],
-        m1: &[u32; 80],
+        m1: &Schedule,
         need_58: bool,
         state_58: &mut [u32; 5],
         state_65: &mut [u32; 5],
@@ -210,12 +210,12 @@ mod tests {
             let mut block_u32 = [0u32; 16];
             read_block(&block, &mut block_u32);
 
-            let (mut hw_state, mut hw_w) = (ihv, [0u32; 80]);
+            let (mut hw_state, mut hw_w) = (ihv, Schedule::zeroed());
             let (mut hw_s58, mut hw_s65) = ([0u32; 5], [0u32; 5]);
             hardware.compress_spill(&mut hw_state, &block, &mut hw_w, &mut hw_s58, &mut hw_s65);
 
             let mut sc_state = ihv;
-            let (mut sc_w, mut s58, mut s65) = ([0u32; 80], [0u32; 5], [0u32; 5]);
+            let (mut sc_w, mut s58, mut s65) = (Schedule::zeroed(), [0u32; 5], [0u32; 5]);
             Backend(Repr::Scalar).compress_spill(
                 &mut sc_state,
                 &block,
@@ -225,16 +225,22 @@ mod tests {
             );
 
             assert_eq!(hw_state, sc_state, "digest diverged");
-            assert_eq!(hw_w, sc_w, "schedule diverged");
+            assert_eq!(hw_w.words(), sc_w.words(), "schedule diverged");
 
             // Independent of the scalar round macros, so a common fault
             // cannot hide.
-            let mut want = [0u32; 80];
-            want[..16].copy_from_slice(&block_u32);
+            let mut want = Schedule::zeroed();
+            for (t, word) in block_u32.iter().enumerate() {
+                want[t] = *word;
+            }
             for t in 16..80 {
                 want[t] = (want[t - 3] ^ want[t - 8] ^ want[t - 14] ^ want[t - 16]).rotate_left(1);
             }
-            assert_eq!(hw_w, want, "schedule is not the standard expansion");
+            assert_eq!(
+                hw_w.words(),
+                want.words(),
+                "schedule is not the standard expansion"
+            );
         }
     }
 
@@ -257,7 +263,7 @@ mod tests {
             }
 
             fn prop(block: [u8; BLOCK_SIZE], ihv: [u32; 5]) -> bool {
-                let (mut hw_state, mut hw_w) = (ihv, [0u32; 80]);
+                let (mut hw_state, mut hw_w) = (ihv, Schedule::zeroed());
                 let (mut hw_s58, mut hw_s65) = ([0u32; 5], [0u32; 5]);
                 Backend::new().compress_spill(
                     &mut hw_state,
@@ -267,7 +273,7 @@ mod tests {
                     &mut hw_s65,
                 );
 
-                let (mut sc_state, mut sc_w) = (ihv, [0u32; 80]);
+                let (mut sc_state, mut sc_w) = (ihv, Schedule::zeroed());
                 let (mut s58, mut s65) = ([0u32; 5], [0u32; 5]);
                 Backend(Repr::Scalar).compress_spill(
                     &mut sc_state,
@@ -277,7 +283,7 @@ mod tests {
                     &mut s65,
                 );
 
-                hw_state == sc_state && hw_w == sc_w
+                hw_state == sc_state && hw_w.words() == sc_w.words()
             }
 
             QuickCheck::new()
@@ -291,7 +297,7 @@ mod tests {
         fn state_recovery_agrees_on_any_block() {
             fn prop(m: [u32; 16], ihv: [u32; 5]) -> bool {
                 let mut replayed = ihv;
-                let (mut w, mut want_58, mut want_65) = ([0u32; 80], [0u32; 5], [0u32; 5]);
+                let (mut w, mut want_58, mut want_65) = (Schedule::zeroed(), [0u32; 5], [0u32; 5]);
                 scalar::compress_spill(&mut replayed, &m, &mut w, &mut want_58, &mut want_65);
 
                 let (mut got_58, mut got_65) = ([0u32; 5], [0u32; 5]);
@@ -336,7 +342,7 @@ mod tests {
             let ihv: [u32; 5] = core::array::from_fn(|_| xorshift(&mut seed) as u32);
 
             let mut replayed = ihv;
-            let (mut w, mut want_58, mut want_65) = ([0u32; 80], [0u32; 5], [0u32; 5]);
+            let (mut w, mut want_58, mut want_65) = (Schedule::zeroed(), [0u32; 5], [0u32; 5]);
             scalar::compress_spill(&mut replayed, &m, &mut w, &mut want_58, &mut want_65);
 
             let (mut got_58, mut got_65) = ([0u32; 5], [0u32; 5]);
