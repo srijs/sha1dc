@@ -331,23 +331,6 @@ pub(crate) fn states_from_w(
     *state_65 = [a, b, c, d, e];
 }
 
-/// Steps 39 down to 0, from the state at step 40. Each caller undoes its own
-/// way back to there first, because the two stored states sit at different
-/// places in the third round.
-macro_rules! back_to_start {
-    ($w:expr, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident) => {{
-        unfive!(parity, K[1], $a, $b, $c, $d, $e, $w, 35);
-        unfive!(parity, K[1], $a, $b, $c, $d, $e, $w, 30);
-        unfive!(parity, K[1], $a, $b, $c, $d, $e, $w, 25);
-        unfive!(parity, K[1], $a, $b, $c, $d, $e, $w, 20);
-
-        unfive!(ch, K[0], $a, $b, $c, $d, $e, $w, 15);
-        unfive!(ch, K[0], $a, $b, $c, $d, $e, $w, 10);
-        unfive!(ch, K[0], $a, $b, $c, $d, $e, $w, 5);
-        unfive!(ch, K[0], $a, $b, $c, $d, $e, $w, 0);
-    }};
-}
-
 /// The chaining values the partner of this block would give, from its state
 /// at step 58 or at step 65.
 ///
@@ -355,7 +338,17 @@ macro_rules! back_to_start {
 /// the steps run. `ihvin` gets the input chaining value, reached by running
 /// backwards, and `ihvout` the output one, which is `ihvin` plus the state
 /// at step 80.
-#[inline(always)]
+///
+/// Both directions start from the same stored state and meet only in that
+/// final addition, so they are two independent chains and the steps below
+/// alternate between them. Each one is a serial dependency a couple of
+/// cycles deep, and a processor with spare width can hold both at once: left
+/// to itself it already overlaps a third to two thirds of the shorter chain,
+/// and taking the rest is worth about a seventh of this function.
+///
+/// The backward chain is the longer one either way — 58 steps against 22
+/// from step 58, and 65 against 15 from step 65 — so it runs on alone once
+/// the forward chain has finished.
 pub(crate) fn recompression_step(
     step: RecompressFrom,
     ihvin: &mut [u32; 5],
@@ -365,46 +358,118 @@ pub(crate) fn recompression_step(
     state: &[u32; 5],
 ) {
     let me2 = &Xor { m1, dm };
-    let [mut a, mut b, mut c, mut d, mut e] = *state;
+    // `b*` walks back towards step 0, `f*` on towards step 80.
+    let [mut b0, mut b1, mut b2, mut b3, mut b4] = *state;
+    let [mut f0, mut f1, mut f2, mut f3, mut f4] = *state;
 
     match step {
         RecompressFrom::Step58 => {
-            // Back over the three steps that are not part of a whole turn,
-            // which leaves the names three places round.
-            unstep!(maj, K[2], a, b, c, d, e, me2.at(57));
-            unstep!(maj, K[2], b, c, d, e, a, me2.at(56));
-            unstep!(maj, K[2], c, d, e, a, b, me2.at(55));
-            unfive!(maj, K[2], d, e, a, b, c, me2, 50);
-            unfive!(maj, K[2], d, e, a, b, c, me2, 45);
-            unfive!(maj, K[2], d, e, a, b, c, me2, 40);
-            back_to_start!(me2, d, e, a, b, c);
-            *ihvin = [d, e, a, b, c];
+            // The steps that are not part of a whole turn, which leave each
+            // chain's names three places round.
+            unstep!(maj, K[2], b0, b1, b2, b3, b4, me2.at(57));
+            unstep!(maj, K[2], b1, b2, b3, b4, b0, me2.at(56));
+            unstep!(maj, K[2], b2, b3, b4, b0, b1, me2.at(55));
+            step!(maj, K[2], f0, f1, f2, f3, f4, me2.at(58));
+            step!(maj, K[2], f4, f0, f1, f2, f3, me2.at(59));
 
-            [a, b, c, d, e] = *state;
-            step!(maj, K[2], a, b, c, d, e, me2.at(58));
-            step!(maj, K[2], e, a, b, c, d, me2.at(59));
-            five!(parity, K[3], d, e, a, b, c, me2, 60);
-            five!(parity, K[3], d, e, a, b, c, me2, 65);
-            five!(parity, K[3], d, e, a, b, c, me2, 70);
-            five!(parity, K[3], d, e, a, b, c, me2, 75);
-            [a, b, c, d, e] = [d, e, a, b, c];
+            unfive!(maj, K[2], b3, b4, b0, b1, b2, me2, 50);
+            five!(parity, K[3], f3, f4, f0, f1, f2, me2, 60);
+            unfive!(maj, K[2], b3, b4, b0, b1, b2, me2, 45);
+            five!(parity, K[3], f3, f4, f0, f1, f2, me2, 65);
+            unfive!(maj, K[2], b3, b4, b0, b1, b2, me2, 40);
+            five!(parity, K[3], f3, f4, f0, f1, f2, me2, 70);
+            unfive!(parity, K[1], b3, b4, b0, b1, b2, me2, 35);
+            five!(parity, K[3], f3, f4, f0, f1, f2, me2, 75);
+
+            // The forward chain is done; the rest of the way back is alone.
+            unfive!(parity, K[1], b3, b4, b0, b1, b2, me2, 30);
+            unfive!(parity, K[1], b3, b4, b0, b1, b2, me2, 25);
+            unfive!(parity, K[1], b3, b4, b0, b1, b2, me2, 20);
+            unfive!(ch, K[0], b3, b4, b0, b1, b2, me2, 15);
+            unfive!(ch, K[0], b3, b4, b0, b1, b2, me2, 10);
+            unfive!(ch, K[0], b3, b4, b0, b1, b2, me2, 5);
+            unfive!(ch, K[0], b3, b4, b0, b1, b2, me2, 0);
+
+            *ihvin = [b3, b4, b0, b1, b2];
+            *ihvout = *ihvin;
+            add(ihvout, [f3, f4, f0, f1, f2]);
         }
         RecompressFrom::Step65 => {
-            unfive!(parity, K[3], a, b, c, d, e, me2, 60);
-            unfive!(maj, K[2], a, b, c, d, e, me2, 55);
-            unfive!(maj, K[2], a, b, c, d, e, me2, 50);
-            unfive!(maj, K[2], a, b, c, d, e, me2, 45);
-            unfive!(maj, K[2], a, b, c, d, e, me2, 40);
-            back_to_start!(me2, a, b, c, d, e);
-            *ihvin = [a, b, c, d, e];
+            unfive!(parity, K[3], b0, b1, b2, b3, b4, me2, 60);
+            five!(parity, K[3], f0, f1, f2, f3, f4, me2, 65);
+            unfive!(maj, K[2], b0, b1, b2, b3, b4, me2, 55);
+            five!(parity, K[3], f0, f1, f2, f3, f4, me2, 70);
+            unfive!(maj, K[2], b0, b1, b2, b3, b4, me2, 50);
+            five!(parity, K[3], f0, f1, f2, f3, f4, me2, 75);
 
-            [a, b, c, d, e] = *state;
-            five!(parity, K[3], a, b, c, d, e, me2, 65);
-            five!(parity, K[3], a, b, c, d, e, me2, 70);
-            five!(parity, K[3], a, b, c, d, e, me2, 75);
+            unfive!(maj, K[2], b0, b1, b2, b3, b4, me2, 45);
+            unfive!(maj, K[2], b0, b1, b2, b3, b4, me2, 40);
+            unfive!(parity, K[1], b0, b1, b2, b3, b4, me2, 35);
+            unfive!(parity, K[1], b0, b1, b2, b3, b4, me2, 30);
+            unfive!(parity, K[1], b0, b1, b2, b3, b4, me2, 25);
+            unfive!(parity, K[1], b0, b1, b2, b3, b4, me2, 20);
+            unfive!(ch, K[0], b0, b1, b2, b3, b4, me2, 15);
+            unfive!(ch, K[0], b0, b1, b2, b3, b4, me2, 10);
+            unfive!(ch, K[0], b0, b1, b2, b3, b4, me2, 5);
+            unfive!(ch, K[0], b0, b1, b2, b3, b4, me2, 0);
+
+            *ihvin = [b0, b1, b2, b3, b4];
+            *ihvout = *ihvin;
+            add(ihvout, [f0, f1, f2, f3, f4]);
         }
     }
+}
 
-    *ihvout = *ihvin;
-    add(ihvout, [a, b, c, d, e]);
+/// The recompression is the compression itself, run out from a state partway
+/// through rather than from the ends, so it can be checked against the
+/// compression without a second implementation of it and without a collision
+/// to hand.
+///
+/// `quickcheck` needs `std`, so a `no_std` build skips this.
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+    use crate::ubc_check::SHA1_DVS;
+    use quickcheck::QuickCheck;
+
+    /// Running the compression over the partner schedule, from the chaining
+    /// value the recompression recovered, must land on the one it reports.
+    ///
+    /// That pins both directions at once. The way back settles `ihvin`, and a
+    /// wrong one starts this compression somewhere else; the way out settles
+    /// what is added to it, and a wrong one lands somewhere else. Either way
+    /// the two disagree.
+    ///
+    /// Any state at all will do, and none of this has to come from a real
+    /// block: the steps are invertible, so whatever `state` is, it is the
+    /// state some message reaches.
+    #[test]
+    fn the_recompression_agrees_with_the_compression() {
+        fn prop(w: [u32; 80], state: [u32; 5]) -> bool {
+            let m1 = Schedule::from_words(w);
+            SHA1_DVS.iter().all(|dv| {
+                let (mut ihvin, mut ihvout) = ([0u32; 5], [0u32; 5]);
+                recompression_step(
+                    dv.recompress_from,
+                    &mut ihvin,
+                    &mut ihvout,
+                    &m1,
+                    &dv.dm,
+                    &state,
+                );
+
+                let mut me2 = Schedule::zeroed();
+                for t in 0..80 {
+                    me2[t] = m1[t] ^ dv.dm[t];
+                }
+
+                let mut replayed = ihvin;
+                compression_w(&mut replayed, &me2);
+                replayed == ihvout
+            })
+        }
+        QuickCheck::new()
+            .tests(500)
+            .quickcheck(prop as fn([u32; 80], [u32; 5]) -> bool);
+    }
 }
