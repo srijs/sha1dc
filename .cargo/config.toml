@@ -1,0 +1,19 @@
+# Runs `wasm32-wasip1` binaries under Node, which the benchmark uses to
+# measure the WebAssembly build. See `bench/wasm-runner.mjs`.
+#
+# Cargo starts the runner in the directory of the package the binary belongs
+# to, which is a different one for the crate and for the benchmark, so the
+# path to the script cannot be written relative to either. It goes through an
+# entry Cargo resolves against this file instead, and the one-line bootstrap
+# turns that into a URL, which is a path Node accepts on Windows too.
+[env]
+SHA1DC_WASM_RUNNER = { value = "bench/wasm-runner.mjs", relative = true }
+
+[target.wasm32-wasip1]
+runner = [
+    "node",
+    "--disable-warning=ExperimentalWarning",
+    "--input-type=module",
+    "-e",
+    "import('node:url').then(({ pathToFileURL }) => import(pathToFileURL(process.env.SHA1DC_WASM_RUNNER)))",
+]

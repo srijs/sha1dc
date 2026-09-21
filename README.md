@@ -54,6 +54,24 @@ SHA-NI on the Xeon and the ARMv8 ones on the M4 and the Graviton4, and
 differ in whether they detect. The `sha1dc` shortfall from 100% is therefore
 what detection costs: 19% to 32%, depending on the machine.
 
+### WebAssembly
+
+The benchmark runs as a WebAssembly module too, under the WASI support of
+Node: `cargo bench -p sha1dc-bench --target wasm32-wasip1`. These figures are
+from the same Apple M4, with the native ones of that machine alongside.
+
+| implementation               | wasm32, Node 24 | native, Apple M4 |
+|------------------------------|----------------:|-----------------:|
+| [`sha1`] 0.11.0              |      871 (100%) |             2979 |
+| `sha1dc` (this crate)        |       619 (71%) |             2400 |
+| [`sha1-checked`] 0.11.0-rc.0 |       582 (67%) |              856 |
+
+WebAssembly has no SHA-1 instructions, and this crate has no vector UBC check
+for it either, so all three run scalar code. Detection costs 29% there, which
+is inside the range the machines above give it. The lead over
+[`sha1-checked`] narrows to 6%, because most of what separates the two on a
+real machine is hardware that neither one can reach here.
+
 ## Features
 
 - `std` *(default)*: Enables run-time CPU feature detection for hardware

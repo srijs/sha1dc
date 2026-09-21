@@ -20,6 +20,23 @@
 //! `cargo bench -- --save-baseline before` and measure the second against it
 //! with `cargo bench -- --baseline before`. That reports a confidence
 //! interval for the change, which a single figure cannot give.
+//!
+//! # WebAssembly
+//!
+//! The same cases run as a WebAssembly module:
+//! `cargo bench -p sha1dc-bench --target wasm32-wasip1`. A `runner` in
+//! `.cargo/config.toml` sends the binary to `bench/wasm-runner.mjs`, which
+//! starts it under the WASI support of Node 22 or newer, so the only thing
+//! to install is the target itself. `cargo test --target wasm32-wasip1`
+//! takes the same route. The estimates go to `target/wasm32-wasip1/criterion`,
+//! which keeps `--baseline` comparisons within the one engine.
+//!
+//! WebAssembly has no SHA-1 instructions, and this crate has no vector UBC
+//! check for it, so every case there is the scalar path and `sha1dc/scalar`
+//! measures what `sha1dc` already does. Building with
+//! `RUSTFLAGS='-C target-feature=+simd128'` lets the compiler vectorize what
+//! it can on its own, which is worth about a fifth on the `no-ubc` cases,
+//! all of which is recompression, and little on the rest.
 
 use std::hint::black_box;
 
