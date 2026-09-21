@@ -37,16 +37,27 @@ pub type Group = Vec<(usize, String)>;
 
 /// Only a continuous range can share one vector load.
 pub fn lane_groups(f: &Family, width: usize) -> Vec<Group> {
-    let mut runs: Vec<Group> = Vec::new();
-    for &(i, dvs) in &f.members {
-        match runs.last_mut() {
-            Some(run) if run.last().unwrap().0 + 1 == i => run.push((i, dv_expr(dvs))),
-            _ => runs.push(vec![(i, dv_expr(dvs))]),
-        }
+    let mut out = Vec::new();
+    let mut rest = f.members.as_slice();
+    while let Some(&(base, _)) = rest.first() {
+        // One pair of loads covers `width` consecutive `i`, so a member is in
+        // this group if it falls in that window. A lane the family has no
+        // member for takes no DV bits and clears nothing, which is what the
+        // group would have cost anyway had the window been shorter.
+        let n = rest.iter().take_while(|(i, _)| *i < base + width).count();
+        let (window, tail) = rest.split_at(n);
+        out.push(
+            (0..width)
+                .map(|k| {
+                    let i = base + k;
+                    let dvs = window.iter().find(|(m, _)| *m == i).map(|&(_, d)| d);
+                    (i, dvs.map_or_else(|| "0".to_owned(), dv_expr))
+                })
+                .collect(),
+        );
+        rest = tail;
     }
-    runs.iter()
-        .flat_map(|r| r.chunks(width).map(<[_]>::to_vec))
-        .collect()
+    out
 }
 
 /// Every lane group with its family. Both vector emitters read this list, so

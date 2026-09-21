@@ -243,6 +243,24 @@ fn apply(
     gain
 }
 
+/// How many groups a run takes, which is how many pairs of loads the
+/// emitter will make of it.
+///
+/// One pair reaches `width` consecutive `i`, so a group takes every member
+/// that falls in that window and the next one starts over. This is the same
+/// walk `emit::lane_groups` does, so the budget the solver spends is the
+/// number of groups that come out.
+fn groups_for(run: &[Cond], width: usize) -> usize {
+    let mut groups = 0;
+    let mut rest = run;
+    while let Some(first) = rest.first() {
+        let end = rest.partition_point(|c| c.i < first.i + width);
+        rest = &rest[end..];
+        groups += 1;
+    }
+    groups
+}
+
 /// The expected number of DV bits that survive a prefix reaching `ranks`,
 /// which is `sum 2^-r`. The scale is `2^-32` per unit, so that the rank of
 /// the longest DV still lands on a whole number and all 32 fit in a `u64`.
@@ -267,20 +285,17 @@ pub fn solve(width: usize, groups: usize) -> Plan {
     for c in &cands {
         by_signature.entry(signature(c)).or_default().push(*c);
     }
+    // Every run of conditions in one signature is a candidate. A shorter run
+    // can be worth more per group than the whole, and a run may step over an
+    // `i` with no condition: the lane it leaves empty takes no DV bits and
+    // clears nothing. What a hole costs is the lanes it wastes, which
+    // [`groups_for`] prices and the greedy below weighs.
     let mut runs: Vec<Vec<Cond>> = Vec::new();
     for mut group in by_signature.into_values() {
         group.sort_by_key(|c| c.i);
-        let mut start = 0;
-        for n in 1..=group.len() {
-            if n == group.len() || group[n].i != group[n - 1].i + 1 {
-                // Every sub-run is a candidate: a shorter one can be worth
-                // more per group than the whole.
-                for from in start..n {
-                    for to in from + 1..=n {
-                        runs.push(group[from..to].to_vec());
-                    }
-                }
-                start = n;
+        for from in 0..group.len() {
+            for to in from + 1..=group.len() {
+                runs.push(group[from..to].to_vec());
             }
         }
     }
@@ -299,7 +314,7 @@ pub fn solve(width: usize, groups: usize) -> Plan {
         let mut best: Option<Candidate> = None;
         let before = survivors(&ranks);
         for run in &runs {
-            let cost = run.len().div_ceil(width);
+            let cost = groups_for(run, width);
             if spent + cost > groups {
                 continue;
             }

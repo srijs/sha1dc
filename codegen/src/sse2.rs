@@ -58,7 +58,18 @@ fn prefix(w: &Schedule) -> u32 {
             "        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << {bit}));"
         );
         out.push_str("        let miss = _mm_cmpeq_epi32(tested, zero);\n");
-        let cast: Vec<String> = bits.iter().map(|b| format!("({b}) as i32")).collect();
+        // An empty lane is already an `i32`; wrapping it would only add
+        // parentheses to the generated source.
+        let cast: Vec<String> = bits
+            .iter()
+            .map(|b| {
+                if *b == "0" {
+                    (*b).to_owned()
+                } else {
+                    format!("({b}) as i32")
+                }
+            })
+            .collect();
         let cast: Vec<&str> = cast.iter().map(String::as_str).collect();
         let _ = writeln!(
             out,
