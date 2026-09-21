@@ -450,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "sha1dc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hex-literal",
  "quickcheck",

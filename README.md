@@ -41,26 +41,18 @@ detection at all, and [`sha1-checked`], which is detects the same collisions and
 is a direct translation of the original C code to Rust. Each is at the best it
 can do on the machine. The machines are an Apple M4 laptop, an EC2 c7i.xlarge
 and an EC2 c8g.xlarge. Throughput is in MiB/s, and as a fraction of the [`sha1`]
-row. The `sha1dc` row is the current revision rather than a release; the other
-two carry the versions they were measured at.
+row.
 
 | implementation               |    Apple M4 | Xeon Platinum 8488C |   Graviton4 |
 |------------------------------|------------:|--------------------:|------------:|
 | [`sha1`] 0.11.0              | 2979 (100%) |         1887 (100%) | 1616 (100%) |
-| `sha1dc`                     |  2400 (81%) |          1285 (68%) |  1286 (80%) |
+| `sha1dc` (this crate)        |  2400 (81%) |          1285 (68%) |  1286 (80%) |
 | [`sha1-checked`] 0.11.0-rc.0 |   856 (29%) |           523 (28%) |   462 (29%) |
 
 [`sha1`] and `sha1dc` both take the SHA-1 instructions of the machine,
 SHA-NI on the Xeon and the ARMv8 ones on the M4 and the Graviton4, and
 differ in whether they detect. The `sha1dc` shortfall from 100% is therefore
 what detection costs: 19% to 32%, depending on the machine.
-
-[`sha1-checked`] being based on the original C code is portable Rust with no
-hardware path to take, so its row is lower for the detection and the missing
-instructions at once, and the instructions are the larger of the two. Built with
-none of them, this crate runs at 921, 522 and 478 MiB/s on the three machines,
-which is level with [`sha1-checked`] on the Xeon and 3% to 8% ahead on the other
-two, rather than the 2.5x to 2.8x of the table.
 
 ## Features
 
