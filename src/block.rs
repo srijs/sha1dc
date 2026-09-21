@@ -79,15 +79,11 @@ fn xor(a: &[u32; 5], b: &[u32; 5]) -> u32 {
 /// partner starts from, and running it forwards gives the one it ends on. A
 /// collision attack needs that end to meet this block's.
 ///
-/// Kept out of line, so that the partner schedule below sits in this frame
-/// and not in the frame of [`compress`], which every block traverses and
-/// only one in twenty leaves for here. Inlined, `aarch64` absorbs the 320
-/// bytes into spill space it already reserves and pays nothing, but
-/// `x86_64` grows `compress` from 440 bytes of frame to 1464 and loses 4%
-/// to 8% on messages of a few dozen bytes. Out of line it is 392, under
-/// what it was before the schedule moved here at all. The call costs about
-/// a percent of bulk throughput, which is the side of the trade that a
-/// hash of a few dozen bytes never reaches.
+/// Kept out of line: inlined, its frame joins [`compress`], which every
+/// block traverses and one in twenty-one leaves for here. That trades short
+/// messages for bulk, and short messages win — inlined, a Xeon 8488C gains
+/// 0.6% on 16 KiB but loses 3.1% on 64 bytes, and git hashes far more small
+/// objects than large ones.
 #[inline(never)]
 fn attacked(
     backend: Backend,
@@ -114,10 +110,9 @@ fn attacked(
         state_65,
     );
 
-    // The partner's schedule and the chaining value it starts from. Both
-    // belong to this call and not to the hasher, which never reads them
-    // again, and which nineteen blocks in twenty never get here to fill.
-    let mut m2 = [0u32; 80];
+    // The chaining value the partner starts from. It belongs to this call
+    // and not to the hasher, which never reads it again, and which nineteen
+    // blocks in twenty never get here to fill.
     let mut ihv2 = [0u32; 5];
 
     // Walking the set bits visits only the candidates. Reading `mask_bit`
@@ -132,22 +127,17 @@ fn attacked(
         let dv = &crate::ubc_check::SHA1_DVS[bit];
         debug_assert_eq!(dv.mask_bit, bit as i32, "DV table is out of order");
 
-        for (partner, (word, difference)) in m2.iter_mut().zip(ctx.m1.iter().zip(&dv.dm)) {
-            *partner = word ^ difference;
-        }
-
-        let Inner {
-            state_58, state_65, ..
-        } = ctx;
         let mut ends_on = [0u32; 5];
+
         recompression_step(
             dv.recompress_from,
             &mut ihv2,
             &mut ends_on,
-            &m2,
+            &ctx.m1,
+            &dv.dm,
             match dv.recompress_from {
-                RecompressFrom::Step58 => state_58,
-                RecompressFrom::Step65 => state_65,
+                RecompressFrom::Step58 => &ctx.state_58,
+                RecompressFrom::Step65 => &ctx.state_65,
             },
         );
 

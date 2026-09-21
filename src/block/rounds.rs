@@ -99,23 +99,60 @@ macro_rules! unstep {
 /// under the names they started with.
 macro_rules! five {
     ($f:ident, $k:expr, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $w:expr, $t:expr) => {{
-        step!($f, $k, $a, $b, $c, $d, $e, $w[$t]);
-        step!($f, $k, $e, $a, $b, $c, $d, $w[$t + 1]);
-        step!($f, $k, $d, $e, $a, $b, $c, $w[$t + 2]);
-        step!($f, $k, $c, $d, $e, $a, $b, $w[$t + 3]);
-        step!($f, $k, $b, $c, $d, $e, $a, $w[$t + 4]);
+        step!($f, $k, $a, $b, $c, $d, $e, $w.at($t));
+        step!($f, $k, $e, $a, $b, $c, $d, $w.at($t + 1));
+        step!($f, $k, $d, $e, $a, $b, $c, $w.at($t + 2));
+        step!($f, $k, $c, $d, $e, $a, $b, $w.at($t + 3));
+        step!($f, $k, $b, $c, $d, $e, $a, $w.at($t + 4));
     }};
 }
 
 /// Five steps backwards: the same five in the other order.
 macro_rules! unfive {
     ($f:ident, $k:expr, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $w:expr, $t:expr) => {{
-        unstep!($f, $k, $a, $b, $c, $d, $e, $w[$t + 4]);
-        unstep!($f, $k, $b, $c, $d, $e, $a, $w[$t + 3]);
-        unstep!($f, $k, $c, $d, $e, $a, $b, $w[$t + 2]);
-        unstep!($f, $k, $d, $e, $a, $b, $c, $w[$t + 1]);
-        unstep!($f, $k, $e, $a, $b, $c, $d, $w[$t]);
+        unstep!($f, $k, $a, $b, $c, $d, $e, $w.at($t + 4));
+        unstep!($f, $k, $b, $c, $d, $e, $a, $w.at($t + 3));
+        unstep!($f, $k, $c, $d, $e, $a, $b, $w.at($t + 2));
+        unstep!($f, $k, $d, $e, $a, $b, $c, $w.at($t + 1));
+        unstep!($f, $k, $e, $a, $b, $c, $d, $w.at($t));
     }};
+}
+
+/// A source of schedule words for the rounds above: an array for the
+/// compression, [`Xor`] for the recompression.
+///
+/// Every index is a constant at the call, so `at` is a constant-offset load
+/// with no bounds check.
+trait Words {
+    fn at(&self, t: usize) -> u32;
+}
+
+impl Words for [u32; 80] {
+    #[inline(always)]
+    fn at(&self, t: usize) -> u32 {
+        self[t]
+    }
+}
+
+/// The partner schedule of a candidate attack, as the two arrays it is the
+/// XOR of rather than the array it would be.
+///
+/// The recompression reads every word exactly once, so storing them buys
+/// nothing — and building the array is dearer than it looks. The compiler
+/// vectorises the XOR, then has to move all eighty words back to the integer
+/// registers the steps use: a hundred `fmov`/`mov.s` on `aarch64`, 134
+/// `movd`/`movq` on `x86_64`. Forming each word where its step runs is 8% to
+/// 16% faster per candidate.
+struct Xor<'a> {
+    m1: &'a [u32; 80],
+    dm: &'a [u32; 80],
+}
+
+impl Words for Xor<'_> {
+    #[inline(always)]
+    fn at(&self, t: usize) -> u32 {
+        self.m1[t] ^ self.dm[t]
+    }
 }
 
 /// One step, expanding the schedule word it needs first.
@@ -307,27 +344,32 @@ macro_rules! back_to_start {
     }};
 }
 
-/// The chaining values the message `me2` would give, from its state at step
-/// 58 or at step 65.
+/// The chaining values the partner of this block would give, from its state
+/// at step 58 or at step 65.
 ///
-/// `ihvin` gets the input chaining value, reached by running backwards, and
-/// `ihvout` the output one, which is `ihvin` plus the state at step 80.
+/// The partner schedule is `m1` XORed with `dm`, formed a word at a time as
+/// the steps run. `ihvin` gets the input chaining value, reached by running
+/// backwards, and `ihvout` the output one, which is `ihvin` plus the state
+/// at step 80.
+#[inline(always)]
 pub(crate) fn recompression_step(
     step: RecompressFrom,
     ihvin: &mut [u32; 5],
     ihvout: &mut [u32; 5],
-    me2: &[u32; 80],
+    m1: &[u32; 80],
+    dm: &[u32; 80],
     state: &[u32; 5],
 ) {
+    let me2 = &Xor { m1, dm };
     let [mut a, mut b, mut c, mut d, mut e] = *state;
 
     match step {
         RecompressFrom::Step58 => {
             // Back over the three steps that are not part of a whole turn,
             // which leaves the names three places round.
-            unstep!(maj, K[2], a, b, c, d, e, me2[57]);
-            unstep!(maj, K[2], b, c, d, e, a, me2[56]);
-            unstep!(maj, K[2], c, d, e, a, b, me2[55]);
+            unstep!(maj, K[2], a, b, c, d, e, me2.at(57));
+            unstep!(maj, K[2], b, c, d, e, a, me2.at(56));
+            unstep!(maj, K[2], c, d, e, a, b, me2.at(55));
             unfive!(maj, K[2], d, e, a, b, c, me2, 50);
             unfive!(maj, K[2], d, e, a, b, c, me2, 45);
             unfive!(maj, K[2], d, e, a, b, c, me2, 40);
@@ -335,8 +377,8 @@ pub(crate) fn recompression_step(
             *ihvin = [d, e, a, b, c];
 
             [a, b, c, d, e] = *state;
-            step!(maj, K[2], a, b, c, d, e, me2[58]);
-            step!(maj, K[2], e, a, b, c, d, me2[59]);
+            step!(maj, K[2], a, b, c, d, e, me2.at(58));
+            step!(maj, K[2], e, a, b, c, d, me2.at(59));
             five!(parity, K[3], d, e, a, b, c, me2, 60);
             five!(parity, K[3], d, e, a, b, c, me2, 65);
             five!(parity, K[3], d, e, a, b, c, me2, 70);
