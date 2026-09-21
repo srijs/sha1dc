@@ -4,11 +4,12 @@
 //! `codegen/src/ubc.rs`, the solver in `codegen/src/solve.rs` or this
 //! target's plan in `codegen/src/main.rs`, and re-run it.
 
+use crate::Schedule;
 use crate::ubc_check::*;
 
 /// Runs the whole check.
 #[inline(always)]
-pub(super) fn check(w: &[u32; 80]) -> u32 {
+pub(super) fn check(w: &Schedule) -> u32 {
     let mask = prefix(w);
 
     // Every check only clears bits, so an empty mask settles the answer.
@@ -21,7 +22,7 @@ pub(super) fn check(w: &[u32; 80]) -> u32 {
 
 /// The checks that run on every block.
 #[inline(always)]
-fn prefix(w: &[u32; 80]) -> u32 {
+fn prefix(w: &Schedule) -> u32 {
     let mut mask: u32 = !0;
 
     mask &= (((w[44] >> 29) ^ (w[45] >> 29)) & 1).wrapping_sub(1)
@@ -230,7 +231,7 @@ fn prefix(w: &[u32; 80]) -> u32 {
 
 /// The checks the prefix leaves. `mask` is never zero here.
 #[inline(always)]
-fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
+fn tail(w: &Schedule, mut mask: u32) -> u32 {
     if mask & (DV_I_46_0_BIT | DV_I_49_0_BIT | DV_I_50_0_BIT | DV_II_48_0_BIT | DV_II_49_0_BIT) != 0
     {
         mask &= (((w[42] >> 29) ^ (w[43] >> 29)) & 1).wrapping_sub(1)

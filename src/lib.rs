@@ -12,7 +12,7 @@
 //!
 //! Where available, the implementation uses SHA-1 hardware instructions on `x86_64` and `aarch64`,
 //! as well as SIMD-enabled algorithms. Nonetheless, detection does more work per block than plain
-//! SHA-1, and slows down hashing by 18% to 31%, depending on the machine.
+//! SHA-1, and slows down hashing by 18% to 29%, depending on the machine.
 //!
 //! Two modes are provided, as two separate `Hasher` structs. [`Hasher`] keeps the standard digest,
 //! with output equivalent to a non-detecting SHA-1 implementation. [`mitigate::Hasher`] computes an
@@ -56,6 +56,103 @@ const BLOCK_SIZE: usize = 64;
 
 const STATE_LEN: usize = 5;
 const INITIAL_H: [u32; STATE_LEN] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
+
+/// How many words the expanded message schedule has.
+pub(crate) const SCHEDULE_LEN: usize = 80;
+
+/// The expanded message schedule, as a compression spilled it.
+///
+/// Indexed by step number, which is not always where the word sits: on `x86`
+/// the array runs backwards. `sha1rnds4` hands each group of four words back
+/// reversed, so storing the group at the mirrored offset undoes that for
+/// nothing, where putting it in order costs a `pshufd` a group — twenty a
+/// block, and worth 2.1 ns on a core with no spare slots to hide them in.
+/// `aarch64` produces its words in order and mirroring would cost it those
+/// same shuffles, so the layout follows the target and this type is the whole
+/// of where that is known.
+#[derive(Clone)]
+#[repr(transparent)]
+pub(crate) struct Schedule([u32; SCHEDULE_LEN]);
+
+impl Schedule {
+    pub(crate) const fn zeroed() -> Self {
+        Self([0; SCHEDULE_LEN])
+    }
+
+    /// A schedule from words already in storage order, for the property
+    /// tests, which check that the forms agree on any contents at all.
+    ///
+    /// Those need `quickcheck`, so they and this go together.
+    #[cfg(all(test, feature = "std"))]
+    pub(crate) const fn from_words(words: [u32; SCHEDULE_LEN]) -> Self {
+        Self(words)
+    }
+
+    /// Whether the array runs backwards.
+    pub(crate) const MIRRORED: bool = cfg!(any(target_arch = "x86", target_arch = "x86_64"));
+
+    /// Where step `t` sits.
+    #[inline(always)]
+    const fn at(t: usize) -> usize {
+        if Self::MIRRORED {
+            SCHEDULE_LEN - 1 - t
+        } else {
+            t
+        }
+    }
+}
+
+/// Where the words physically sit, for the code that moves a whole window
+/// rather than one word at a time: a hardware backend's spill, and the vector
+/// forms of the filter.
+///
+/// A target with neither — no SHA-1 instructions and no vector unit — calls
+/// none of these, and reaches every word through [`Index`](core::ops::Index)
+/// instead. `i586` calls two of the three, having a backend but no vector
+/// filter.
+#[allow(dead_code, reason = "a target without either kind calls none of these")]
+impl Schedule {
+    /// The words as they are stored, for the generated vector forms.
+    #[inline(always)]
+    pub(crate) const fn words(&self) -> &[u32; SCHEDULE_LEN] {
+        &self.0
+    }
+
+    /// The same, for a backend writing a whole window.
+    #[inline(always)]
+    pub(crate) const fn words_mut(&mut self) -> &mut [u32; SCHEDULE_LEN] {
+        &mut self.0
+    }
+
+    /// Where a window of `n` consecutive steps starting at `t` begins.
+    ///
+    /// A run of steps is a run of words either way round; a mirrored one
+    /// starts at the other end.
+    #[inline(always)]
+    pub(crate) const fn window(t: usize, n: usize) -> usize {
+        if Self::MIRRORED {
+            SCHEDULE_LEN - n - t
+        } else {
+            t
+        }
+    }
+}
+
+impl core::ops::Index<usize> for Schedule {
+    type Output = u32;
+
+    #[inline(always)]
+    fn index(&self, t: usize) -> &u32 {
+        &self.0[Self::at(t)]
+    }
+}
+
+impl core::ops::IndexMut<usize> for Schedule {
+    #[inline(always)]
+    fn index_mut(&mut self, t: usize) -> &mut u32 {
+        &mut self.0[Self::at(t)]
+    }
+}
 
 /// A SHA-1 digest.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -197,7 +294,7 @@ struct Inner {
     /// True if a collision occurred.
     found_collision: bool,
     /// This block's expanded message schedule.
-    m1: [u32; 80],
+    m1: Schedule,
     /// Earlier states, which make recompression faster.
     state_58: [u32; STATE_LEN],
     state_65: [u32; STATE_LEN],
@@ -220,7 +317,7 @@ impl Inner {
             ubc_check: builder.ubc_check,
             reduced_round_collision: builder.reduced_round_collisions,
             found_collision: false,
-            m1: [0; 80],
+            m1: Schedule::zeroed(),
             state_58: [0; STATE_LEN],
             state_65: [0; STATE_LEN],
         }
@@ -260,7 +357,7 @@ impl Inner {
         self.buffer_len = 0;
         // Keep the configuration.
         self.found_collision = false;
-        self.m1 = [0; 80];
+        self.m1 = Schedule::zeroed();
         self.state_58 = [0; STATE_LEN];
         self.state_65 = [0; STATE_LEN];
     }

@@ -8,6 +8,7 @@
 //! The steps come from [`rounds`](super::super::rounds), which also runs them
 //! backwards for the detection.
 
+use crate::Schedule;
 use crate::block::rounds::{
     K, add, ch, five_expand, five_load, maj, parity, step, step_expand, step_load,
 };
@@ -17,7 +18,7 @@ use crate::block::rounds::{
 pub(crate) fn compress_spill(
     ihv: &mut [u32; 5],
     m: &[u32; 16],
-    w: &mut [u32; 80],
+    w: &mut Schedule,
     state_58: &mut [u32; 5],
     state_65: &mut [u32; 5],
 ) {

@@ -42,6 +42,7 @@
 //! [FIPS 180-1]: https://csrc.nist.gov/pubs/fips/180-1/final
 //! [paper]: https://marc-stevens.nl/research/papers/C13-S.pdf
 
+use crate::Schedule;
 use crate::ubc_check::RecompressFrom;
 
 /// The round constants, one per 20 steps. FIPS 180-1, section 5.
@@ -122,12 +123,13 @@ macro_rules! unfive {
 /// compression, [`Xor`] for the recompression.
 ///
 /// Every index is a constant at the call, so `at` is a constant-offset load
-/// with no bounds check.
+/// with no bounds check. [`Schedule`] knows where the spill actually put the
+/// word; nothing here has to.
 trait Words {
     fn at(&self, t: usize) -> u32;
 }
 
-impl Words for [u32; 80] {
+impl Words for Schedule {
     #[inline(always)]
     fn at(&self, t: usize) -> u32 {
         self[t]
@@ -144,13 +146,15 @@ impl Words for [u32; 80] {
 /// `movd`/`movq` on `x86_64`. Forming each word where its step runs is 8% to
 /// 16% faster per candidate.
 struct Xor<'a> {
-    m1: &'a [u32; 80],
+    m1: &'a Schedule,
     dm: &'a [u32; 80],
 }
 
 impl Words for Xor<'_> {
     #[inline(always)]
     fn at(&self, t: usize) -> u32 {
+        // Only `m1` is a spill; the difference comes from the table, which
+        // is in step order on every target.
         self.m1[t] ^ self.dm[t]
     }
 }
@@ -217,7 +221,7 @@ pub(crate) fn add(left: &mut [u32; 5], right: [u32; 5]) {
 }
 
 /// All 80 steps over an expanded schedule, added into `ihv`.
-pub(crate) fn compression_w(ihv: &mut [u32; 5], w: &[u32; 80]) {
+pub(crate) fn compression_w(ihv: &mut [u32; 5], w: &Schedule) {
     let [mut a, mut b, mut c, mut d, mut e] = *ihv;
 
     five!(ch, K[0], a, b, c, d, e, w, 0);
@@ -254,7 +258,7 @@ pub(crate) fn compression_w(ihv: &mut [u32; 5], w: &[u32; 80]) {
 pub(crate) fn states_back_from_h(
     ihv_before: &[u32; 5],
     ihv_after: &[u32; 5],
-    w: &[u32; 80],
+    w: &Schedule,
     need_58: bool,
     state_58: &mut [u32; 5],
     state_65: &mut [u32; 5],
@@ -293,7 +297,7 @@ pub(crate) fn states_back_from_h(
 #[cfg(test)]
 pub(crate) fn states_from_w(
     ihv: &[u32; 5],
-    w: &[u32; 80],
+    w: &Schedule,
     state_58: &mut [u32; 5],
     state_65: &mut [u32; 5],
 ) {
@@ -356,7 +360,7 @@ pub(crate) fn recompression_step(
     step: RecompressFrom,
     ihvin: &mut [u32; 5],
     ihvout: &mut [u32; 5],
-    m1: &[u32; 80],
+    m1: &Schedule,
     dm: &[u32; 80],
     state: &[u32; 5],
 ) {

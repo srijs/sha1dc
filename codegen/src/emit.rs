@@ -122,10 +122,10 @@ pub fn module(name: &str, prefix: &str, tail: &str) -> String {
     // still has to write one. What is left of the unsafety is in `load`.
     let check = match feature {
         None => format!(
-            "/// Runs the whole check.\n#[inline(always)]\npub(super) fn check(w: &[u32; 80]) -> u32 {{\n{BODY}"
+            "/// Runs the whole check.\n#[inline(always)]\npub(super) fn check(w: &Schedule) -> u32 {{\n{BODY}"
         ),
         Some(f) => format!(
-            "/// Runs the whole check. Requires `{f}`, so a caller that cannot\n/// prove the feature needs an `unsafe` block.\n#[target_feature(enable = \"{f}\")]\npub(super) fn check(w: &[u32; 80]) -> u32 {{\n{BODY}"
+            "/// Runs the whole check. Requires `{f}`, so a caller that cannot\n/// prove the feature needs an `unsafe` block.\n#[target_feature(enable = \"{f}\")]\npub(super) fn check(w: &Schedule) -> u32 {{\n{BODY}"
         ),
     };
 
@@ -136,6 +136,7 @@ pub fn module(name: &str, prefix: &str, tail: &str) -> String {
          //! `codegen/src/ubc.rs`, the solver in `codegen/src/solve.rs` or this\n\
          //! target's plan in `codegen/src/main.rs`, and re-run it.\n\
          \n\
+         use crate::Schedule;\n\
          use crate::ubc_check::*;\n\
          {}\n\
          {check}\n{prefix}\n{tail}",
@@ -153,7 +154,12 @@ fn preamble(name: &str) -> String {
         "scalar" => String::new(),
         "neon" => format!(
             "\nuse core::arch::aarch64::*;\n{}{}",
-            load("neon", 4, "uint32x4_t", "vld1q_u32(w.as_ptr().add(I))"),
+            load(
+                "neon",
+                4,
+                "uint32x4_t",
+                "vld1q_u32(w.words().as_ptr().add(at))"
+            ),
             SPLAT
         ),
         "sse2" => format!(
@@ -162,7 +168,7 @@ fn preamble(name: &str) -> String {
                 "sse2",
                 4,
                 "__m128i",
-                "_mm_loadu_si128(w.as_ptr().add(I).cast())"
+                "_mm_loadu_si128(w.words().as_ptr().add(at).cast())"
             )
         ),
         "avx2" => format!(
@@ -171,7 +177,7 @@ fn preamble(name: &str) -> String {
                 "avx2",
                 8,
                 "__m256i",
-                "_mm256_loadu_si256(w.as_ptr().add(I).cast())"
+                "_mm256_loadu_si256(w.words().as_ptr().add(at).cast())"
             )
         ),
         other => panic!("no preamble for {other}"),
@@ -205,13 +211,18 @@ fn splat(bits: [u32; 4]) -> uint32x4_t {
 fn load(feature: &str, width: usize, ty: &str, call: &str) -> String {
     format!(
         r#"
-/// The {width} schedule words starting at `I`.
+/// The {width} schedule words of steps `I..I + {width}`.
+///
+/// One load on either layout; [`Schedule::window`] says where it starts. A
+/// mirrored one hands back its lanes in the other order, which each group's
+/// DV bits are emitted to match.
 #[inline]
 #[target_feature(enable = "{feature}")]
-fn load<const I: usize>(w: &[u32; {SCHEDULE}]) -> {ty} {{
+fn load<const I: usize>(w: &Schedule) -> {ty} {{
     const {{ assert!(I + {width} <= {SCHEDULE}, "a group reads past the schedule") }}
-    // SAFETY: the const assert above proves `w[I..I + {width}]` is in bounds,
-    // which is the whole of what this reads.
+    let at = Schedule::window(I, {width});
+    // SAFETY: the const assert above proves the {width}-word window is in
+    // bounds wherever this layout puts it, which is all this reads.
     unsafe {{ {call} }}
 }}
 "#

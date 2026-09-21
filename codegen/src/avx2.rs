@@ -23,7 +23,7 @@ pub fn emit(plan: &Plan) -> String {
 ///
 /// The highest index read is {HIGH}, and every load proves its own bound.
 #[target_feature(enable = "avx2")]
-fn prefix(w: &[u32; 80]) -> u32 {
+fn prefix(w: &Schedule) -> u32 {
     let zero = _mm256_setzero_si256();
     let mut acc0 = zero;
     let mut acc1 = zero;
@@ -62,7 +62,9 @@ fn prefix(w: &[u32; 80]) -> u32 {
         let cast: Vec<&str> = cast.iter().map(String::as_str).collect();
         let _ = writeln!(
             out,
-            "        let bits = _mm256_setr_epi32({});",
+            // The lanes run backwards over a mirrored schedule; `set` takes its
+            // arguments the other way round from `setr`.
+            "        let bits = _mm256_set_epi32({});",
             lanes(&cast, "        ", W)
         );
         let _ = write!(

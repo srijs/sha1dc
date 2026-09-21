@@ -19,22 +19,35 @@ use core::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::*;
 
+use crate::Schedule;
+
 /// SHA-NI holds the four words of a group in the opposite order to the
 /// schedule, so every crossing between the two reverses them.
 const REVERSE: i32 = 0b00_01_10_11;
 
 /// Writes the four words a group is about to use into the schedule.
 ///
+/// The group is held reversed, so it goes to the mirrored offset rather than
+/// through a `pshufd` to put it in order. What that leaves is [`Schedule`]'s
+/// backwards layout, which every reader of it already indexes through.
+///
 /// `I` is a const parameter, so a spill past the end of the schedule is a
 /// compile error at the call site rather than a promise in a comment.
 #[inline]
 #[target_feature(enable = "sse2")]
-fn spill<const I: usize>(w: &mut [u32; 80], msg: __m128i) {
+fn spill<const I: usize>(w: &mut Schedule, msg: __m128i) {
     const { assert!(I + 4 <= 80, "the spill runs past the schedule") }
-    let ordered = _mm_shuffle_epi32(msg, REVERSE);
-    // SAFETY: the const assert above proves `w[I..I + 4]` is in bounds,
-    // which is the whole of what this writes.
-    unsafe { _mm_storeu_si128(w.as_mut_ptr().add(I).cast(), ordered) }
+    // SAFETY: the const assert above proves `I + 4 <= 80`, so the mirrored
+    // window `w[76 - I..80 - I]` is in bounds, which is all this writes.
+    unsafe {
+        _mm_storeu_si128(
+            w.words_mut()
+                .as_mut_ptr()
+                .add(Schedule::window(I, 4))
+                .cast(),
+            msg,
+        )
+    }
 }
 
 /// The four message words starting at byte `I`, in native order.
@@ -92,7 +105,7 @@ macro_rules! group {
 /// Requires `sha`, `sse2`, `ssse3` and `sse4.1`, so a caller that cannot
 /// prove the features needs an `unsafe` block.
 #[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
-pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut [u32; 80]) {
+pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Schedule) {
     // Turns the big-endian message into native order, reversing the four
     // words along with the bytes.
     let swap = _mm_set_epi64x(0x0001_0203_0405_0607, 0x0809_0A0B_0C0D_0E0F);

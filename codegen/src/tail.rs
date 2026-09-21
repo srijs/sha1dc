@@ -39,7 +39,7 @@ pub fn emit(plan: &Plan) -> String {
         r#"
 /// The checks the prefix leaves. `mask` is never zero here.
 #[inline(always)]
-fn tail(w: &[u32; 80], mut mask: u32) -> u32 {
+fn tail(w: &Schedule, mut mask: u32) -> u32 {
 "#,
     );
 
