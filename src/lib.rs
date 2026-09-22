@@ -88,6 +88,22 @@ impl Schedule {
         Self(words)
     }
 
+    /// Expands 16 message words the way SHA-1 does, for the tests.
+    ///
+    /// Written out apart from the round code, so a test that compares against
+    /// it cannot share a fault with what it checks.
+    #[cfg(test)]
+    pub(crate) fn expand(m: &[u32; 16]) -> Self {
+        let mut w = Self::zeroed();
+        for (t, word) in m.iter().enumerate() {
+            w[t] = *word;
+        }
+        for t in 16..SCHEDULE_LEN {
+            w[t] = (w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]).rotate_left(1);
+        }
+        w
+    }
+
     /// Whether the array runs backwards.
     pub(crate) const MIRRORED: bool = cfg!(any(target_arch = "x86", target_arch = "x86_64"));
 

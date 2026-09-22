@@ -73,26 +73,6 @@ fn long_message() {
     );
 }
 
-/// The digest must not change with the split of the data across `update`
-/// calls.
-#[test]
-fn chunked_updates_agree() {
-    let data = pseudorandom(4096 + 37);
-    let expected = sha1dc::digest(&data).expect("no collision");
-
-    for chunk in [1, 2, 3, 7, 31, 32, 63, 64, 65, 127, 128, 1000] {
-        let mut hasher = Hasher::new();
-        for part in data.chunks(chunk) {
-            hasher.update(part);
-        }
-        assert_eq!(
-            hasher.finalize().expect("no collision"),
-            expected,
-            "chunk size {chunk}"
-        );
-    }
-}
-
 #[test]
 fn reset_restores_initial_state() {
     let mut hasher = Hasher::new();

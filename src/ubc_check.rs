@@ -381,17 +381,13 @@ mod tests {
     fn schedules(n: usize, mut f: impl FnMut(&Schedule)) {
         let mut seed = 0x1234_5678_9abc_def0u64;
         for _ in 0..n {
-            let mut w = Schedule::zeroed();
-            for t in 0..16 {
+            let m = core::array::from_fn(|_| {
                 seed ^= seed << 13;
                 seed ^= seed >> 7;
                 seed ^= seed << 17;
-                w[t] = seed as u32;
-            }
-            for t in 16..80 {
-                w[t] = (w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]).rotate_left(1);
-            }
-            f(&w);
+                seed as u32
+            });
+            f(&Schedule::expand(&m));
         }
     }
 
@@ -462,32 +458,6 @@ mod tests {
             expected,
             "this job was meant to exercise a different implementation of `ubc_check`"
         );
-    }
-
-    /// Expands 16 words the way SHA-1 does, so that the schedule is one a
-    /// message can produce.
-    ///
-    fn expand(m: &[u32; 16]) -> Schedule {
-        let mut w = Schedule::zeroed();
-        for (t, word) in m.iter().enumerate() {
-            w[t] = *word;
-        }
-        for t in 16..80 {
-            w[t] = (w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]).rotate_left(1);
-        }
-        w
-    }
-
-    /// Every target solves for its own plan, so the forms share no code. They
-    /// must still agree: a check that clears too few bits gives correct
-    /// digests and only causes more recompressions, so no other test sees it.
-    #[test]
-    fn every_form_matches_scalar() {
-        schedules(20_000, |w| {
-            if let Some(form) = diverging_form(w) {
-                panic!("{form} diverged");
-            }
-        });
     }
 
     /// Compares the derived DV table against the values in the C original.
@@ -569,13 +539,18 @@ mod tests {
 
         /// The same, over schedules that a message can produce. This is the
         /// distribution the check meets in use.
+        ///
+        /// Every target solves for its own plan, so the forms share no code.
+        /// They must still agree: a check that clears too few bits gives
+        /// correct digests and only causes more recompressions, so no other
+        /// test sees it.
         #[test]
         fn forms_agree_on_expanded_schedules() {
             fn prop(m: [u32; 16]) -> bool {
-                diverging_form(&expand(&m)).is_none()
+                diverging_form(&Schedule::expand(&m)).is_none()
             }
             QuickCheck::new()
-                .tests(2_000)
+                .tests(20_000)
                 .quickcheck(prop as fn([u32; 16]) -> bool);
         }
 
@@ -585,7 +560,7 @@ mod tests {
         #[test]
         fn scalar_only_gives_the_same_mask() {
             fn prop(m: [u32; 16]) -> bool {
-                let w = expand(&m);
+                let w = Schedule::expand(&m);
                 ubc_check(&w, true) == ubc_check(&w, false)
             }
             QuickCheck::new()
@@ -599,9 +574,9 @@ mod tests {
     /// A random schedule is a poor way to reach the tail. Every check only
     /// clears bits, so a DV survives only when all 7 to 15 of its conditions
     /// hold at once, which a random schedule manages between once in 128 and
-    /// once in 33,000. Over the 20,000 schedules of
-    /// [`every_form_matches_scalar`], five of the 32 DVs are never set and
-    /// eight more are set once, so the checks behind them never run.
+    /// once in 33,000. The 20,000 random schedules of
+    /// [`properties::forms_agree_on_expanded_schedules`] therefore set the
+    /// rarest DVs once or not at all, and the checks behind them barely run.
     ///
     /// Searching for such a schedule is the wrong move, because the
     /// conditions can be solved instead. Each one is a linear equation over
@@ -728,10 +703,10 @@ mod tests {
 
     /// The forms must agree where the tail actually runs.
     ///
-    /// [`every_form_matches_scalar`] covers the prefix well and the tail
-    /// badly, because it takes schedules as they come. These are built to
-    /// reach it: every DV is kept alive, sixty-four times over, so that the
-    /// checks behind even the rarest of them run.
+    /// [`properties::forms_agree_on_expanded_schedules`] covers the prefix
+    /// well and the tail badly, because it takes schedules as they come.
+    /// These are built to reach it: every DV is kept alive, sixty-four times
+    /// over, so that the checks behind even the rarest of them run.
     #[test]
     fn every_form_matches_scalar_where_the_tail_runs() {
         const PER_DV: usize = 64;
@@ -742,7 +717,7 @@ mod tests {
 
         for dv in 0..32 {
             for _ in 0..PER_DV {
-                let w = expand(&witness::message(&forms, dv, &mut seed));
+                let w = Schedule::expand(&witness::message(&forms, dv, &mut seed));
 
                 let mask = ubc_check(&w, true);
                 assert_ne!(mask >> dv & 1, 0, "the witness for DV {dv} did not survive");
