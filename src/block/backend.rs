@@ -88,6 +88,7 @@ impl Backend {
     ///
     /// This can leave `state_58` and `state_65` unset. Call
     /// [`ensure_states`](Self::ensure_states) before you read them.
+    #[inline]
     pub(crate) fn compress_spill(
         &self,
         state: &mut [u32; 5],
@@ -153,6 +154,7 @@ impl Backend {
     /// Forwards runs all eighty rounds where the check reaches only step 58
     /// or 65. The steps between are a bijection, so the two are the same
     /// test, and the whole way needs no state taken out of the middle.
+    #[inline]
     pub(crate) fn is_attack(
         &self,
         step: RecompressFrom,

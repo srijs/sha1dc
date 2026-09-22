@@ -22,6 +22,7 @@ pub fn emit(plan: &Plan) -> String {
 /// The checks that run on every block. Requires `avx2`.
 ///
 /// The highest index read is {HIGH}, and every load proves its own bound.
+#[inline]
 #[target_feature(enable = "avx2")]
 fn prefix(w: &Schedule) -> u32 {
     let zero = _mm256_setzero_si256();

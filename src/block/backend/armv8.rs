@@ -17,6 +17,7 @@ use core::arch::aarch64::*;
 
 use crate::Schedule;
 use crate::block::rounds::{self, K};
+use crate::mem::{load_u8x16, load_u32x4, store_u32x4};
 use crate::ubc_check::RecompressFrom;
 
 /// The four schedule words starting at `I`.
@@ -26,10 +27,7 @@ use crate::ubc_check::RecompressFrom;
 #[inline]
 #[target_feature(enable = "sha2")]
 fn spill<const I: usize>(w: &mut Schedule, v: uint32x4_t) {
-    const { assert!(I + 4 <= 80, "the spill runs past the schedule") }
-    // SAFETY: the const assert above proves `w[I..I + 4]` is in bounds,
-    // which is the whole of what this writes.
-    unsafe { vst1q_u32(w.words_mut().as_mut_ptr().add(Schedule::window(I, 4)), v) }
+    store_u32x4(w.window_mut::<I, 4>(), v);
 }
 
 /// The four message words starting at byte `I`, in native order.
@@ -37,52 +35,43 @@ fn spill<const I: usize>(w: &mut Schedule, v: uint32x4_t) {
 #[target_feature(enable = "sha2")]
 fn msg<const I: usize>(block: &[u8; 64]) -> uint32x4_t {
     const { assert!(I + 16 <= 64, "the load runs past the block") }
-    // SAFETY: the const assert above proves `block[I..I + 16]` is in bounds,
-    // which is the whole of what this reads.
-    let bytes = unsafe { vld1q_u8(block.as_ptr().add(I)) };
+    let bytes = load_u8x16(block[I..I + 16].try_into().unwrap());
     vreinterpretq_u32_u8(vrev32q_u8(bytes))
 }
 
-/// The four schedule words of group `G`, exclusive-ored with the partner's
-/// difference and the round constant added.
+/// The four schedule words of steps `T..T + 4`, exclusive-ored with the
+/// partner's difference and the round constant added.
 ///
-/// The read side of [`spill`], with `G` const for the same reason: a group
+/// The read side of [`spill`], with `T` const for the same reason: a group
 /// past the end is a compile error rather than a promise in a comment.
 #[inline]
 #[target_feature(enable = "sha2")]
-fn wk<const G: usize>(m1: &Schedule, dm: &[u32; 80], k: u32) -> uint32x4_t {
-    const { assert!(4 * G + 4 <= 80, "the group runs past the schedule") }
-    // SAFETY: the const assert above proves both reads are four words inside
-    // an array of eighty.
-    unsafe {
-        let at = m1.words().as_ptr().add(Schedule::window(4 * G, 4));
-        vaddq_u32(
-            veorq_u32(vld1q_u32(at), vld1q_u32(dm.as_ptr().add(4 * G))),
-            vdupq_n_u32(k),
-        )
-    }
+fn wk<const T: usize>(m1: &Schedule, dm: &[u32; 80], k: u32) -> uint32x4_t {
+    const { assert!(T + 4 <= 80, "the group runs past the schedule") }
+    let spilled = load_u32x4(m1.window::<T, 4>());
+    let diff = load_u32x4(dm[T..T + 4].try_into().unwrap());
+    vaddq_u32(veorq_u32(spilled, diff), vdupq_n_u32(k))
 }
 
 /// The `abcd` half of the state. The fifth word is carried on its own.
 #[inline]
 #[target_feature(enable = "sha2")]
 fn load_abcd(state: &[u32; 5]) -> uint32x4_t {
-    // SAFETY: `vld1q_u32` reads four words, and `state` has five.
-    unsafe { vld1q_u32(state.as_ptr()) }
+    load_u32x4(state.first_chunk().unwrap())
 }
 
 /// Writes `abcd` back, leaving the fifth word alone.
 #[inline]
 #[target_feature(enable = "sha2")]
 fn store_abcd(state: &mut [u32; 5], v: uint32x4_t) {
-    // SAFETY: `vst1q_u32` writes four words, and `state` has five.
-    unsafe { vst1q_u32(state.as_mut_ptr(), v) }
+    store_u32x4(state.first_chunk_mut().unwrap(), v);
 }
 
 /// Compresses one block, spilling the message schedule into `w`.
 ///
 /// Requires `sha2`, so a caller that cannot prove the feature needs an
 /// `unsafe` block.
+#[inline]
 #[target_feature(enable = "sha2")]
 #[expect(
     clippy::too_many_lines,
@@ -277,6 +266,7 @@ pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Sch
 /// than handed in, so it never leaves the vector registers.
 ///
 /// [`Backend::is_attack`]: crate::block::Backend::is_attack
+#[inline]
 #[target_feature(enable = "sha2")]
 pub(crate) fn recompress(
     step: RecompressFrom,
@@ -296,7 +286,7 @@ pub(crate) fn recompress(
     /// the two names so that neither waits on the round that just used it.
     macro_rules! group {
         ($f:ident, $k:expr, $ein:ident, $eout:ident, $g:expr) => {{
-            let wk = wk::<$g>(m1, dm, $k);
+            let wk = wk::<{ 4 * $g }>(m1, dm, $k);
             $eout = vsha1h_u32(vgetq_lane_u32(abcd, 0));
             abcd = $f(abcd, $ein, wk);
         }};

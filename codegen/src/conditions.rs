@@ -16,6 +16,8 @@ pub fn emit() -> String {
          //! space, chosen to suit vector code. The tests use the published form\n\
          //! because it is per DV: solving the entries for one DV gives a message\n\
          //! that keeps that DV alive, and so reaches the checks behind it.\n\
+         \n\
+         #![forbid(unsafe_code)]\n\
          \n",
     );
 

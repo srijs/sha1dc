@@ -32,7 +32,7 @@ struct Scratch {
 /// Compresses `blocks` into the hasher's chaining value, testing each one for
 /// a collision attack.
 #[inline]
-pub(crate) fn compress(ctx: &mut Inner, blocks: &[[u8; BLOCK_SIZE]]) {
+pub(crate) fn compress(ctx: &mut Inner, blocks: &[u8]) {
     let backend = ctx.backend;
     let mut s = Scratch {
         m1: Schedule::zeroed(),
@@ -40,7 +40,9 @@ pub(crate) fn compress(ctx: &mut Inner, blocks: &[[u8; BLOCK_SIZE]]) {
         state_65: [0; 5],
     };
 
-    for block in blocks {
+    for block in blocks.chunks_exact(BLOCK_SIZE) {
+        let block: &[u8; BLOCK_SIZE] = block.try_into().unwrap();
+
         // The input chaining value. Only a flagged block goes on to use it,
         // and only within this iteration, so it belongs to the loop rather
         // than to the hasher.

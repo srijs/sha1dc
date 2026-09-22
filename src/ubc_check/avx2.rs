@@ -4,9 +4,12 @@
 //! `codegen/src/ubc.rs`, the solver in `codegen/src/solve.rs` or this
 //! target's plan in `codegen/src/main.rs`, and re-run it.
 
+#![forbid(unsafe_code)]
+
 use crate::Schedule;
 use crate::ubc_check::*;
 
+use crate::mem::load_u32x8;
 #[cfg(target_arch = "x86")]
 use core::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
@@ -14,21 +17,17 @@ use core::arch::x86_64::*;
 
 /// The 8 schedule words of steps `I..I + 8`.
 ///
-/// One load on either layout; [`Schedule::window`] says where it starts. A
-/// mirrored one hands back its lanes in the other order, which each group's
-/// DV bits are emitted to match.
+/// One load on either layout. A mirrored one hands back its lanes in the
+/// other order, which each group's DV bits are emitted to match.
 #[inline]
 #[target_feature(enable = "avx2")]
 fn load<const I: usize>(w: &Schedule) -> __m256i {
-    const { assert!(I + 8 <= 80, "a group reads past the schedule") }
-    let at = Schedule::window(I, 8);
-    // SAFETY: the const assert above proves the 8-word window is in
-    // bounds wherever this layout puts it, which is all this reads.
-    unsafe { _mm256_loadu_si256(w.words().as_ptr().add(at).cast()) }
+    load_u32x8(w.window::<I, 8>())
 }
 
 /// Runs the whole check. Requires `avx2`, so a caller that cannot
 /// prove the feature needs an `unsafe` block.
+#[inline]
 #[target_feature(enable = "avx2")]
 pub(super) fn check(w: &Schedule) -> u32 {
     let mask = prefix(w);
@@ -44,6 +43,7 @@ pub(super) fn check(w: &Schedule) -> u32 {
 /// The checks that run on every block. Requires `avx2`.
 ///
 /// The highest index read is 69, and every load proves its own bound.
+#[inline]
 #[target_feature(enable = "avx2")]
 fn prefix(w: &Schedule) -> u32 {
     let zero = _mm256_setzero_si256();
@@ -554,6 +554,7 @@ static TAIL_SPANS: [(u16, u8); 32] = [
 ];
 
 /// The checks the prefix leaves. `mask` is never zero here.
+#[inline]
 fn tail(w: &Schedule, mask: u32) -> u32 {
     let mut out = mask;
     let mut rest = mask;

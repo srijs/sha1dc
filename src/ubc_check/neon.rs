@@ -4,36 +4,34 @@
 //! `codegen/src/ubc.rs`, the solver in `codegen/src/solve.rs` or this
 //! target's plan in `codegen/src/main.rs`, and re-run it.
 
+#![forbid(unsafe_code)]
+
 use crate::Schedule;
 use crate::ubc_check::*;
 
+use crate::mem::load_u32x4;
 use core::arch::aarch64::*;
 
 /// The 4 schedule words of steps `I..I + 4`.
 ///
-/// One load on either layout; [`Schedule::window`] says where it starts. A
-/// mirrored one hands back its lanes in the other order, which each group's
-/// DV bits are emitted to match.
+/// One load on either layout. A mirrored one hands back its lanes in the
+/// other order, which each group's DV bits are emitted to match.
 #[inline]
 #[target_feature(enable = "neon")]
 fn load<const I: usize>(w: &Schedule) -> uint32x4_t {
-    const { assert!(I + 4 <= 80, "a group reads past the schedule") }
-    let at = Schedule::window(I, 4);
-    // SAFETY: the const assert above proves the 4-word window is in
-    // bounds wherever this layout puts it, which is all this reads.
-    unsafe { vld1q_u32(w.words().as_ptr().add(at)) }
+    load_u32x4(w.window::<I, 4>())
 }
 
 /// The DV bits of a group, as a vector.
 #[inline]
 #[target_feature(enable = "neon")]
 fn splat(bits: [u32; 4]) -> uint32x4_t {
-    // SAFETY: `vld1q_u32` reads four words, the length of `bits`.
-    unsafe { vld1q_u32(bits.as_ptr()) }
+    load_u32x4(&bits)
 }
 
 /// Runs the whole check. Requires `neon`, so a caller that cannot
 /// prove the feature needs an `unsafe` block.
+#[inline]
 #[target_feature(enable = "neon")]
 pub(super) fn check(w: &Schedule) -> u32 {
     let mask = prefix(w);
@@ -49,6 +47,7 @@ pub(super) fn check(w: &Schedule) -> u32 {
 /// The checks that run on every block. Requires `neon`.
 ///
 /// The highest index read is 65, and every load proves its own bound.
+#[inline]
 #[target_feature(enable = "neon")]
 fn prefix(w: &Schedule) -> u32 {
     let mut acc0 = vdupq_n_u32(0);
@@ -602,6 +601,7 @@ static TAIL_SPANS: [(u16, u8); 32] = [
 ];
 
 /// The checks the prefix leaves. `mask` is never zero here.
+#[inline]
 fn tail(w: &Schedule, mask: u32) -> u32 {
     let mut out = mask;
     let mut rest = mask;

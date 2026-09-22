@@ -4,6 +4,8 @@
 //! `codegen/src/ubc.rs`, the solver in `codegen/src/solve.rs` or this
 //! target's plan in `codegen/src/main.rs`, and re-run it.
 
+#![forbid(unsafe_code)]
+
 use crate::Schedule;
 use crate::ubc_check::*;
 
@@ -488,6 +490,7 @@ static TAIL_SPANS: [(u16, u8); 32] = [
 ];
 
 /// The checks the prefix leaves. `mask` is never zero here.
+#[inline]
 fn tail(w: &Schedule, mask: u32) -> u32 {
     let mut out = mask;
     let mut rest = mask;
