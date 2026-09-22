@@ -16,7 +16,8 @@ compile_error!("the armv8 backend needs an aarch64 target");
 use core::arch::aarch64::*;
 
 use crate::Schedule;
-use crate::block::rounds::K;
+use crate::block::rounds::{self, K};
+use crate::ubc_check::RecompressFrom;
 
 /// The four schedule words starting at `I`.
 ///
@@ -40,6 +41,26 @@ fn msg<const I: usize>(block: &[u8; 64]) -> uint32x4_t {
     // which is the whole of what this reads.
     let bytes = unsafe { vld1q_u8(block.as_ptr().add(I)) };
     vreinterpretq_u32_u8(vrev32q_u8(bytes))
+}
+
+/// The four schedule words of group `G`, exclusive-ored with the partner's
+/// difference and the round constant added.
+///
+/// The read side of [`spill`], with `G` const for the same reason: a group
+/// past the end is a compile error rather than a promise in a comment.
+#[inline]
+#[target_feature(enable = "sha2")]
+fn wk<const G: usize>(m1: &Schedule, dm: &[u32; 80], k: u32) -> uint32x4_t {
+    const { assert!(4 * G + 4 <= 80, "the group runs past the schedule") }
+    // SAFETY: the const assert above proves both reads are four words inside
+    // an array of eighty.
+    unsafe {
+        let at = m1.words().as_ptr().add(Schedule::window(4 * G, 4));
+        vaddq_u32(
+            veorq_u32(vld1q_u32(at), vld1q_u32(dm.as_ptr().add(4 * G))),
+            vdupq_n_u32(k),
+        )
+    }
 }
 
 /// The `abcd` half of the state. The fifth word is carried on its own.
@@ -247,4 +268,68 @@ pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Sch
 
     store_abcd(state, abcd);
     state[4] = e0;
+}
+
+/// Whether this candidate is the attack it is a candidate for.
+///
+/// The `aarch64` half of [`Backend::is_attack`], which says why it runs this
+/// way round. The chaining value it starts from is worked out here rather
+/// than handed in, so it never leaves the vector registers.
+///
+/// [`Backend::is_attack`]: crate::block::Backend::is_attack
+#[target_feature(enable = "sha2")]
+pub(crate) fn recompress(
+    step: RecompressFrom,
+    m1: &Schedule,
+    dm: &[u32; 80],
+    state: &[u32; 5],
+    chaining_out: &[u32; 5],
+) -> bool {
+    let target = rounds::partner_start(step, m1, dm, state, chaining_out);
+
+    let mut abcd = load_abcd(&target);
+    let start = abcd;
+    let mut e0 = target[4];
+    let mut e1;
+
+    /// Four rounds. `vsha1h` carries the fifth word, which alternates between
+    /// the two names so that neither waits on the round that just used it.
+    macro_rules! group {
+        ($f:ident, $k:expr, $ein:ident, $eout:ident, $g:expr) => {{
+            let wk = wk::<$g>(m1, dm, $k);
+            $eout = vsha1h_u32(vgetq_lane_u32(abcd, 0));
+            abcd = $f(abcd, $ein, wk);
+        }};
+    }
+
+    group!(vsha1cq_u32, K[0], e0, e1, 0);
+    group!(vsha1cq_u32, K[0], e1, e0, 1);
+    group!(vsha1cq_u32, K[0], e0, e1, 2);
+    group!(vsha1cq_u32, K[0], e1, e0, 3);
+    group!(vsha1cq_u32, K[0], e0, e1, 4);
+
+    group!(vsha1pq_u32, K[1], e1, e0, 5);
+    group!(vsha1pq_u32, K[1], e0, e1, 6);
+    group!(vsha1pq_u32, K[1], e1, e0, 7);
+    group!(vsha1pq_u32, K[1], e0, e1, 8);
+    group!(vsha1pq_u32, K[1], e1, e0, 9);
+
+    group!(vsha1mq_u32, K[2], e0, e1, 10);
+    group!(vsha1mq_u32, K[2], e1, e0, 11);
+    group!(vsha1mq_u32, K[2], e0, e1, 12);
+    group!(vsha1mq_u32, K[2], e1, e0, 13);
+    group!(vsha1mq_u32, K[2], e0, e1, 14);
+
+    group!(vsha1pq_u32, K[3], e1, e0, 15);
+    group!(vsha1pq_u32, K[3], e0, e1, 16);
+    group!(vsha1pq_u32, K[3], e1, e0, 17);
+    group!(vsha1pq_u32, K[3], e0, e1, 18);
+    group!(vsha1pq_u32, K[3], e1, e0, 19);
+
+    // Feed-forward.
+    let mut ends_on = [0u32; 5];
+    store_abcd(&mut ends_on, vaddq_u32(abcd, start));
+    ends_on[4] = e0.wrapping_add(target[4]);
+
+    crate::block::xor(&ends_on, chaining_out) == 0
 }

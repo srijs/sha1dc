@@ -20,6 +20,8 @@ use core::arch::x86::*;
 use core::arch::x86_64::*;
 
 use crate::Schedule;
+use crate::block::rounds;
+use crate::ubc_check::RecompressFrom;
 
 /// SHA-NI holds the four words of a group in the opposite order to the
 /// schedule, so every crossing between the two reverses them.
@@ -61,6 +63,28 @@ fn msg<const I: usize>(block: &[u8; 64], swap: __m128i) -> __m128i {
     _mm_shuffle_epi8(raw, swap)
 }
 
+/// The four schedule words of group `G`, exclusive-ored with the partner's
+/// difference, in the order the rounds want them.
+///
+/// The read side of [`spill`], with `G` const for the same reason: a group
+/// past the end is a compile error rather than a promise in a comment.
+///
+/// The spill is already reversed, being mirrored for that reason; the
+/// difference table is in step order, so it is the one that turns round.
+#[inline]
+#[target_feature(enable = "sse2,ssse3")]
+fn words<const G: usize>(m1: &Schedule, dm: &[u32; 80]) -> __m128i {
+    const { assert!(4 * G + 4 <= 80, "the group runs past the schedule") }
+    // SAFETY: the const assert above proves both reads are four words inside
+    // an array of eighty.
+    unsafe {
+        let at = m1.words().as_ptr().add(Schedule::window(4 * G, 4));
+        let spilled = _mm_loadu_si128(at.cast());
+        let diff = _mm_loadu_si128(dm.as_ptr().add(4 * G).cast());
+        _mm_xor_si128(spilled, _mm_shuffle_epi32(diff, REVERSE))
+    }
+}
+
 /// The `abcd` half of the state. The fifth word is carried on its own.
 #[inline]
 #[target_feature(enable = "sse2")]
@@ -79,33 +103,33 @@ fn store_abcd(state: &mut [u32; 5], abcd: __m128i) {
     unsafe { _mm_storeu_si128(state.as_mut_ptr().cast(), ordered) }
 }
 
-/// One group of four rounds, once the schedule is under way.
-///
-/// `ready` holds the words these rounds use. `next` is finished here, and the
-/// two groups behind it take the first and second of their three steps. The
-/// working word arrives in `live` and the one for the next group is put aside
-/// in `held`.
-macro_rules! group {
-    (
-        $w:expr, $t:literal, $k:expr, $abcd:ident, $live:ident, $held:ident,
-        $ready:ident, $next:ident, $second:ident, $first:ident
-    ) => {{
-        spill::<$t>($w, $ready);
-        $live = _mm_sha1nexte_epu32($live, $ready);
-        $held = $abcd;
-        $next = _mm_sha1msg2_epu32($next, $ready);
-        $abcd = _mm_sha1rnds4_epu32($abcd, $live, $k);
-        $first = _mm_sha1msg1_epu32($first, $ready);
-        $second = _mm_xor_si128($second, $ready);
-    }};
-}
-
 /// Compresses one block, spilling the message schedule into `w`.
 ///
 /// Requires `sha`, `sse2`, `ssse3` and `sse4.1`, so a caller that cannot
 /// prove the features needs an `unsafe` block.
 #[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
 pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Schedule) {
+    /// One group of four rounds, once the schedule is under way.
+    ///
+    /// `ready` holds the words these rounds use. `next` is finished here,
+    /// and the two groups behind it take the first and second of their three
+    /// steps. The working word arrives in `live` and the one for the next
+    /// group is put aside in `held`.
+    macro_rules! group {
+        (
+            $w:expr, $t:literal, $k:expr, $abcd:ident, $live:ident, $held:ident,
+            $ready:ident, $next:ident, $second:ident, $first:ident
+        ) => {{
+            spill::<$t>($w, $ready);
+            $live = _mm_sha1nexte_epu32($live, $ready);
+            $held = $abcd;
+            $next = _mm_sha1msg2_epu32($next, $ready);
+            $abcd = _mm_sha1rnds4_epu32($abcd, $live, $k);
+            $first = _mm_sha1msg1_epu32($first, $ready);
+            $second = _mm_xor_si128($second, $ready);
+        }};
+    }
+
     // Turns the big-endian message into native order, reversing the four
     // words along with the bytes.
     let swap = _mm_set_epi64x(0x0001_0203_0405_0607, 0x0809_0A0B_0C0D_0E0F);
@@ -190,4 +214,79 @@ pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Sch
 
     store_abcd(state, abcd);
     state[4] = _mm_extract_epi32(e0, 3) as u32;
+}
+
+/// Whether this candidate is the attack it is a candidate for.
+///
+/// The `x86` half of [`Backend::is_attack`], which says why it runs this way
+/// round. The chaining value it starts from is worked out here rather than
+/// handed in, so it never leaves the vector registers.
+///
+/// [`Backend::is_attack`]: crate::block::Backend::is_attack
+#[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
+pub(crate) fn recompress(
+    step: RecompressFrom,
+    m1: &Schedule,
+    dm: &[u32; 80],
+    state: &[u32; 5],
+    chaining_out: &[u32; 5],
+) -> bool {
+    let target = rounds::partner_start(step, m1, dm, state, chaining_out);
+
+    let mut abcd = load_abcd(&target);
+    let abcd_in = abcd;
+    let e_in = _mm_set_epi32(target[4] as i32, 0, 0, 0);
+
+    // The first group has no round behind it to carry the working word in,
+    // so it adds the chaining value's fifth word itself.
+    let mut e0 = _mm_add_epi32(e_in, words::<0>(m1, dm));
+    let mut e1 = abcd;
+    abcd = _mm_sha1rnds4_epu32(abcd, e0, 0);
+
+    /// Four rounds. The working word arrives in `live` and the one the next
+    /// four need is put aside in `held`, which is why two alternate.
+    ///
+    /// `compress_spill`'s group carries the schedule too; here there is none
+    /// to carry, only words to read.
+    macro_rules! group {
+        ($g:expr, $k:expr, $live:ident, $held:ident) => {{
+            let ready = words::<$g>(m1, dm);
+            $live = _mm_sha1nexte_epu32($live, ready);
+            $held = abcd;
+            abcd = _mm_sha1rnds4_epu32(abcd, $live, $k);
+        }};
+    }
+
+    group!(1, 0, e1, e0);
+    group!(2, 0, e0, e1);
+    group!(3, 0, e1, e0);
+    group!(4, 0, e0, e1);
+
+    group!(5, 1, e1, e0);
+    group!(6, 1, e0, e1);
+    group!(7, 1, e1, e0);
+    group!(8, 1, e0, e1);
+    group!(9, 1, e1, e0);
+
+    group!(10, 2, e0, e1);
+    group!(11, 2, e1, e0);
+    group!(12, 2, e0, e1);
+    group!(13, 2, e1, e0);
+    group!(14, 2, e0, e1);
+
+    group!(15, 3, e1, e0);
+    group!(16, 3, e0, e1);
+    group!(17, 3, e1, e0);
+    group!(18, 3, e0, e1);
+    group!(19, 3, e1, e0);
+
+    // Feed-forward.
+    e0 = _mm_sha1nexte_epu32(e0, e_in);
+    abcd = _mm_add_epi32(abcd, abcd_in);
+
+    let mut ends_on = [0u32; 5];
+    store_abcd(&mut ends_on, abcd);
+    ends_on[4] = _mm_extract_epi32(e0, 3) as u32;
+
+    crate::block::xor(&ends_on, chaining_out) == 0
 }

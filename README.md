@@ -20,7 +20,7 @@ targets are `neon`, `sse2` and `avx2`, as well as a scalar baseline.
 
 Where available, the implementation also uses SHA-1 hardware instructions on
 `x86_64` and `aarch64`. Detection still does more work per block than plain
-SHA-1, and slows down hashing by 15% to 26%, depending on the machine.
+SHA-1, and costs 14% to 23% of throughput, depending on the machine.
 
 ## Usage
 
@@ -46,13 +46,13 @@ row.
 | implementation               |    Apple M4 | Xeon Platinum 8488C |   Graviton4 |
 |------------------------------|------------:|--------------------:|------------:|
 | [`sha1`] 0.11.0              | 2948 (100%) |         1872 (100%) | 1616 (100%) |
-| `sha1dc` (this crate)        |  2404 (82%) |          1387 (74%) |  1375 (85%) |
+| `sha1dc` (this crate)        |  2404 (82%) |          1446 (77%) |  1394 (86%) |
 | [`sha1-checked`] 0.11.0-rc.0 |   852 (29%) |           528 (28%) |   456 (28%) |
 
 [`sha1`] and `sha1dc` both take the SHA-1 instructions of the machine,
 SHA-NI on the Xeon and the ARMv8 ones on the M4 and the Graviton4, and
 differ in whether they detect. The `sha1dc` shortfall from 100% is therefore
-what detection costs: 15% to 26%, depending on the machine.
+what detection costs: 14% to 23%, depending on the machine.
 
 ## Features
 

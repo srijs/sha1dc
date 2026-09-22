@@ -420,6 +420,43 @@ pub(crate) fn recompression_step(
     }
 }
 
+/// The chaining value an attack would have had to start from.
+///
+/// The way out from the stored state is what the partner's compression adds
+/// to its input, so the only input the check can accept is this block's
+/// output less that. Nothing here runs backwards.
+#[allow(dead_code, reason = "a target with no SHA-1 instructions never asks")]
+pub(crate) fn partner_start(
+    step: RecompressFrom,
+    m1: &Schedule,
+    dm: &[u32; 80],
+    state: &[u32; 5],
+    chaining_out: &[u32; 5],
+) -> [u32; 5] {
+    let me2 = &Xor { m1, dm };
+
+    let [mut f0, mut f1, mut f2, mut f3, mut f4] = *state;
+    let out = match step {
+        RecompressFrom::Step58 => {
+            step!(maj, K[2], f0, f1, f2, f3, f4, me2.at(58));
+            step!(maj, K[2], f4, f0, f1, f2, f3, me2.at(59));
+            five!(parity, K[3], f3, f4, f0, f1, f2, me2, 60);
+            five!(parity, K[3], f3, f4, f0, f1, f2, me2, 65);
+            five!(parity, K[3], f3, f4, f0, f1, f2, me2, 70);
+            five!(parity, K[3], f3, f4, f0, f1, f2, me2, 75);
+            [f3, f4, f0, f1, f2]
+        }
+        RecompressFrom::Step65 => {
+            five!(parity, K[3], f0, f1, f2, f3, f4, me2, 65);
+            five!(parity, K[3], f0, f1, f2, f3, f4, me2, 70);
+            five!(parity, K[3], f0, f1, f2, f3, f4, me2, 75);
+            [f0, f1, f2, f3, f4]
+        }
+    };
+
+    core::array::from_fn(|i| chaining_out[i].wrapping_sub(out[i]))
+}
+
 /// The recompression is the compression itself, run out from a state partway
 /// through rather than from the ends, so it can be checked against the
 /// compression without a second implementation of it and without a collision
@@ -466,6 +503,32 @@ mod tests {
                 let mut replayed = ihvin;
                 compression_w(&mut replayed, &me2);
                 replayed == ihvout
+            })
+        }
+        QuickCheck::new()
+            .tests(500)
+            .quickcheck(prop as fn([u32; 80], [u32; 5]) -> bool);
+    }
+
+    /// [`partner_start`] must find what the way back finds.
+    ///
+    /// It subtracts the way out from this block's output, which is the
+    /// arithmetic the way back's answer satisfies.
+    #[test]
+    fn the_partner_start_is_what_the_way_back_finds() {
+        fn prop(w: [u32; 80], state: [u32; 5]) -> bool {
+            let m1 = Schedule::from_words(w);
+            SHA1_DVS.iter().all(|dv| {
+                let (mut ihvin, mut ihvout) = ([0u32; 5], [0u32; 5]);
+                recompression_step(
+                    dv.recompress_from,
+                    &mut ihvin,
+                    &mut ihvout,
+                    &m1,
+                    &dv.dm,
+                    &state,
+                );
+                partner_start(dv.recompress_from, &m1, &dv.dm, &state, &ihvout) == ihvin
             })
         }
         QuickCheck::new()
