@@ -6,6 +6,13 @@
 //! with one instruction. The DV bits of the lane are then masked in and added
 //! to an accumulator.
 //!
+//! The mask is applied with `vminq_u32`, or `vqsubq_u32` where a clear bit is
+//! what rules the DVs out, not with `vandq_u32` or `vbicq_u32`. Each lane of
+//! the test is zero or all ones, so both give the DV bits or zero. LLVM
+//! rewrites a `vtstq_u32` whose result meets an AND into `and`, `cmeq` and
+//! `bic`, one instruction more per group and seventeen a block; it leaves
+//! these two alone.
+//!
 //! There are two accumulators, so the final OR chain does not serialize the
 //! groups. The target settles `neon`, so a `cfg` selects this form.
 
@@ -55,25 +62,24 @@ fn prefix(w: &Schedule) -> u32 {
                 -shift
             );
         }
-        if f.clears_on == 1 {
-            let _ = writeln!(
-                out,
-                "        let hit = vtstq_u32(x, vdupq_n_u32(1 << {bit}));"
-            );
-        } else {
-            let _ = writeln!(
-                out,
-                "        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << {bit})), vdupq_n_u32(0));"
-            );
-        }
+        let _ = writeln!(
+            out,
+            "        let set = vtstq_u32(x, vdupq_n_u32(1 << {bit}));"
+        );
         let _ = writeln!(
             out,
             "        let bits = splat([{}]);",
             lanes(&bits, "        ", 4)
         );
+        // The DVs are ruled out where the bit is set, or where it is clear.
+        let cleared = if f.clears_on == 1 {
+            "vminq_u32(set, bits)"
+        } else {
+            "vqsubq_u32(bits, set)"
+        };
         let _ = write!(
             out,
-            "        {acc} = vorrq_u32({acc}, vandq_u32(hit, bits));\n    }}\n"
+            "        {acc} = vorrq_u32({acc}, {cleared});\n    }}\n"
         );
     }
 

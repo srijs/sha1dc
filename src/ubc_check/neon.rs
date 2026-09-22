@@ -58,72 +58,72 @@ fn prefix(w: &Schedule) -> u32 {
         let near = load::<35>(w);
         let far = load::<36>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 5));
-        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 1)), vdupq_n_u32(0));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 1));
         let bits = splat([
             DV_I_46_2_BIT | DV_I_49_2_BIT,
             DV_I_47_2_BIT | DV_I_50_2_BIT | DV_II_46_2_BIT,
             DV_I_48_2_BIT | DV_I_51_2_BIT,
             0,
         ]);
-        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
+        acc0 = vorrq_u32(acc0, vqsubq_u32(bits, set));
     }
 
     {
         let near = load::<36>(w);
         let far = load::<37>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 5));
-        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 0)), vdupq_n_u32(0));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 0));
         let bits = splat([DV_II_49_2_BIT, DV_II_50_2_BIT, DV_II_51_2_BIT, 0]);
-        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
+        acc1 = vorrq_u32(acc1, vqsubq_u32(bits, set));
     }
 
     {
         let near = load::<38>(w);
         let far = load::<39>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 5));
-        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 1)), vdupq_n_u32(0));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 1));
         let bits = splat([
             DV_I_49_2_BIT,
             DV_I_46_2_BIT | DV_I_50_2_BIT | DV_II_49_2_BIT,
             DV_I_47_2_BIT | DV_I_51_2_BIT | DV_II_50_2_BIT,
             DV_I_48_2_BIT | DV_II_46_2_BIT | DV_II_51_2_BIT,
         ]);
-        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
+        acc0 = vorrq_u32(acc0, vqsubq_u32(bits, set));
     }
 
     {
         let near = load::<39>(w);
         let far = load::<40>(w);
         let x = veorq_u32(vshrq_n_u32(near, 5), far);
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 1));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 1));
         let bits = splat([
             DV_I_49_2_BIT,
             DV_I_50_2_BIT | DV_II_49_2_BIT,
             DV_I_51_2_BIT | DV_II_50_2_BIT,
             DV_II_46_2_BIT | DV_II_51_2_BIT,
         ]);
-        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
+        acc1 = vorrq_u32(acc1, vminq_u32(set, bits));
     }
 
     {
         let near = load::<39>(w);
         let far = load::<40>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
-        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 4)), vdupq_n_u32(0));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 4));
         let bits = splat([
             DV_I_43_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT,
             DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
             DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT,
             DV_I_44_0_BIT | DV_I_46_0_BIT | DV_II_56_0_BIT,
         ]);
-        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
+        acc0 = vorrq_u32(acc0, vqsubq_u32(bits, set));
     }
 
     {
         let near = load::<38>(w);
         let far = load::<41>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 4));
         let bits = splat([
             DV_I_44_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
             DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_49_0_BIT | DV_II_48_0_BIT | DV_II_55_0_BIT,
@@ -135,14 +135,14 @@ fn prefix(w: &Schedule) -> u32 {
                 | DV_II_45_0_BIT
                 | DV_II_50_0_BIT,
         ]);
-        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
+        acc1 = vorrq_u32(acc1, vminq_u32(set, bits));
     }
 
     {
         let near = load::<40>(w);
         let far = load::<41>(w);
         let x = veorq_u32(near, far);
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 29));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 29));
         let bits = splat([
             DV_I_44_0_BIT
                 | DV_I_47_0_BIT
@@ -159,14 +159,14 @@ fn prefix(w: &Schedule) -> u32 {
                 | DV_II_49_0_BIT
                 | DV_II_50_0_BIT,
         ]);
-        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
+        acc0 = vorrq_u32(acc0, vminq_u32(set, bits));
     }
 
     {
         let near = load::<40>(w);
         let far = load::<43>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 4));
         let bits = splat([
             DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT,
             DV_I_43_0_BIT
@@ -188,28 +188,28 @@ fn prefix(w: &Schedule) -> u32 {
                 | DV_II_47_0_BIT
                 | DV_II_52_0_BIT,
         ]);
-        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
+        acc1 = vorrq_u32(acc1, vminq_u32(set, bits));
     }
 
     {
         let near = load::<42>(w);
         let far = load::<44>(w);
         let x = veorq_u32(near, far);
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 6));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 6));
         let bits = splat([
             DV_I_46_2_BIT | DV_I_48_2_BIT,
             DV_I_47_2_BIT | DV_I_49_2_BIT,
             DV_I_46_2_BIT | DV_I_48_2_BIT | DV_I_50_2_BIT,
             DV_I_47_2_BIT | DV_I_49_2_BIT | DV_I_51_2_BIT,
         ]);
-        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
+        acc0 = vorrq_u32(acc0, vminq_u32(set, bits));
     }
 
     {
         let near = load::<44>(w);
         let far = load::<45>(w);
         let x = veorq_u32(near, far);
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 29));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 29));
         let bits = splat([
             DV_I_48_0_BIT
                 | DV_I_51_0_BIT
@@ -237,42 +237,42 @@ fn prefix(w: &Schedule) -> u32 {
                 | DV_II_53_0_BIT
                 | DV_II_54_0_BIT,
         ]);
-        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
+        acc1 = vorrq_u32(acc1, vminq_u32(set, bits));
     }
 
     {
         let near = load::<44>(w);
         let far = load::<45>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 5));
-        let hit = vceqq_u32(vandq_u32(x, vdupq_n_u32(1 << 1)), vdupq_n_u32(0));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 1));
         let bits = splat([
             DV_I_51_2_BIT | DV_II_49_2_BIT,
             DV_II_50_2_BIT,
             DV_II_51_2_BIT,
             DV_II_46_2_BIT,
         ]);
-        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
+        acc0 = vorrq_u32(acc0, vqsubq_u32(bits, set));
     }
 
     {
         let near = load::<45>(w);
         let far = load::<46>(w);
         let x = veorq_u32(vshrq_n_u32(near, 5), far);
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 1));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 1));
         let bits = splat([
             DV_II_49_2_BIT,
             DV_I_46_2_BIT | DV_II_50_2_BIT,
             DV_I_47_2_BIT | DV_II_51_2_BIT,
             DV_I_48_2_BIT,
         ]);
-        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
+        acc1 = vorrq_u32(acc1, vminq_u32(set, bits));
     }
 
     {
         let near = load::<44>(w);
         let far = load::<47>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 4));
         let bits = splat([
             DV_I_44_0_BIT
                 | DV_I_46_0_BIT
@@ -299,28 +299,28 @@ fn prefix(w: &Schedule) -> u32 {
                 | DV_II_51_0_BIT
                 | DV_II_56_0_BIT,
         ]);
-        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
+        acc0 = vorrq_u32(acc0, vminq_u32(set, bits));
     }
 
     {
         let near = load::<46>(w);
         let far = load::<48>(w);
         let x = veorq_u32(near, far);
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 6));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 6));
         let bits = splat([
             DV_I_48_2_BIT | DV_I_50_2_BIT,
             DV_I_49_2_BIT | DV_I_51_2_BIT,
             DV_I_50_2_BIT | DV_II_46_2_BIT,
             DV_I_51_2_BIT,
         ]);
-        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
+        acc1 = vorrq_u32(acc1, vminq_u32(set, bits));
     }
 
     {
         let near = load::<48>(w);
         let far = load::<49>(w);
         let x = veorq_u32(near, far);
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 29));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 29));
         let bits = splat([
             DV_I_45_0_BIT
                 | DV_I_52_0_BIT
@@ -337,35 +337,35 @@ fn prefix(w: &Schedule) -> u32 {
             DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_51_0_BIT | DV_II_52_0_BIT | DV_II_56_0_BIT,
             DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_52_0_BIT | DV_II_53_0_BIT,
         ]);
-        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
+        acc0 = vorrq_u32(acc0, vminq_u32(set, bits));
     }
 
     {
         let near = load::<48>(w);
         let far = load::<51>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 4));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 4));
         let bits = splat([
             DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_52_0_BIT,
             DV_I_49_0_BIT | DV_I_51_0_BIT | DV_II_45_0_BIT | DV_II_47_0_BIT | DV_II_53_0_BIT,
             DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_48_0_BIT | DV_II_54_0_BIT,
             DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_49_0_BIT | DV_II_55_0_BIT,
         ]);
-        acc1 = vorrq_u32(acc1, vandq_u32(hit, bits));
+        acc1 = vorrq_u32(acc1, vminq_u32(set, bits));
     }
 
     {
         let near = load::<52>(w);
         let far = load::<53>(w);
         let x = veorq_u32(near, far);
-        let hit = vtstq_u32(x, vdupq_n_u32(1 << 29));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 29));
         let bits = splat([
             DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT | DV_II_53_0_BIT | DV_II_54_0_BIT,
             DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT | DV_II_54_0_BIT | DV_II_55_0_BIT,
             DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT | DV_II_55_0_BIT | DV_II_56_0_BIT,
             DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_51_0_BIT | DV_II_56_0_BIT,
         ]);
-        acc0 = vorrq_u32(acc0, vandq_u32(hit, bits));
+        acc0 = vorrq_u32(acc0, vminq_u32(set, bits));
     }
 
     let acc = vorrq_u32(acc0, acc1);
