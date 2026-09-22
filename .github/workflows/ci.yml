@@ -24,11 +24,14 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest, rust: stable }
-          - { os: ubuntu-24.04-arm, rust: stable }
-          - { os: macos-latest, rust: stable }
+          - { os: ubuntu-24.04-arm, rust: stable, block: armv8, ubc_check: neon }
+          - { os: macos-latest, rust: stable, block: armv8, ubc_check: neon }
           - { os: windows-latest, rust: stable }
           - { os: ubuntu-latest, rust: beta }
           - { os: ubuntu-latest, rust: nightly }
+    env:
+      SHA1DC_EXPECT_BLOCK: ${{ matrix.block }}
+      SHA1DC_EXPECT_UBC_CHECK: ${{ matrix.ubc_check }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
@@ -72,18 +75,49 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: i686-unknown-linux-gnu, i586-unknown-linux-gnu, riscv64gc-unknown-linux-gnu, thumbv7em-none-eabi, wasm32-unknown-unknown
+          targets: riscv64gc-unknown-linux-gnu, thumbv7em-none-eabi, wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --lib --all-features --target i686-unknown-linux-gnu
-      - run: cargo check --lib --all-features --target i586-unknown-linux-gnu
       - run: cargo check --lib --all-features --target riscv64gc-unknown-linux-gnu
       - run: cargo check --lib --no-default-features --target thumbv7em-none-eabi
       - run: cargo check --lib --no-default-features --target wasm32-unknown-unknown
 
+  emulated:
+    name: emulated / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: s390x big-endian, target: s390x-unknown-linux-gnu, cpu: max, block: scalar, ubc_check: scalar, deps: gcc-s390x-linux-gnu }
+          - { name: i686, target: i686-unknown-linux-gnu, cpu: max, block: sha-ni, ubc_check: avx2, deps: gcc-multilib }
+          - { name: i586, target: i586-unknown-linux-gnu, cpu: max, block: sha-ni, ubc_check: scalar, deps: gcc-multilib }
+          - { name: x86_64 sse2, target: x86_64-unknown-linux-gnu, cpu: Nehalem, block: scalar, ubc_check: sse2 }
+          - { name: x86_64 atom, target: x86_64-unknown-linux-gnu, cpu: Denverton, block: sha-ni, ubc_check: sse2 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install QEMU and the cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user ${{ matrix.deps }}
+      - name: Test
+        env:
+          SHA1DC_EXPECT_BLOCK: ${{ matrix.block }}
+          SHA1DC_EXPECT_UBC_CHECK: ${{ matrix.ubc_check }}
+          CARGO_TARGET_S390X_UNKNOWN_LINUX_GNU_LINKER: s390x-linux-gnu-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: qemu-x86_64 -cpu ${{ matrix.cpu }}
+          CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_RUNNER: qemu-i386 -cpu ${{ matrix.cpu }} -L /usr/i686-linux-gnu
+          CARGO_TARGET_I586_UNKNOWN_LINUX_GNU_RUNNER: qemu-i386 -cpu ${{ matrix.cpu }} -L /usr/i686-linux-gnu
+          CARGO_TARGET_S390X_UNKNOWN_LINUX_GNU_RUNNER: qemu-s390x -cpu ${{ matrix.cpu }} -L /usr/s390x-linux-gnu
+        run: cargo test -p sha1dc --all-features --target ${{ matrix.target }}
+
   success:
     name: CI success
     runs-on: ubuntu-latest
-    needs: [test, checks, cross]
+    needs: [test, checks, cross, emulated]
     if: always()
     steps:
       - name: Check that all jobs succeeded

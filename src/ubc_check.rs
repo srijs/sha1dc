@@ -307,6 +307,42 @@ fn has_avx2() -> bool {
     }
 }
 
+/// The dispatch, written once. `$pick` is a macro applied to the form the
+/// cascade picks: [`ubc_check`] passes one that runs it, the test that
+/// reports which form ran passes one that names it.
+macro_rules! dispatch {
+    ($scalar_only:expr, $pick:ident) => {{
+        #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+        if !$scalar_only {
+            return $pick!(neon);
+        }
+
+        #[cfg(all(
+            any(target_arch = "x86", target_arch = "x86_64"),
+            target_feature = "sse2"
+        ))]
+        if !$scalar_only {
+            #[cfg(any(feature = "std", target_feature = "avx2"))]
+            if has_avx2() {
+                return $pick!(avx2);
+            }
+            return $pick!(sse2);
+        }
+
+        // On a target with neither there is nothing to turn off.
+        #[cfg(not(any(
+            all(target_arch = "aarch64", target_feature = "neon"),
+            all(
+                any(target_arch = "x86", target_arch = "x86_64"),
+                target_feature = "sse2"
+            )
+        )))]
+        let _ = $scalar_only;
+
+        $pick!(scalar)
+    }};
+}
+
 /// Checks the unavoidable bitconditions of every listed DV against an expanded
 /// message block. Returns a mask. A set bit marks a DV that met all of its
 /// conditions and still needs the recompression check.
@@ -315,37 +351,25 @@ fn has_avx2() -> bool {
 /// Tests and benchmarks use it to reach that path.
 #[inline]
 pub(crate) fn ubc_check(w: &Schedule, scalar_only: bool) -> u32 {
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-    if !scalar_only {
-        // SAFETY: the cfg guarantees `neon`. All reads stay in `w`.
-        return unsafe { neon::check(w) };
-    }
-
-    #[cfg(all(
-        any(target_arch = "x86", target_arch = "x86_64"),
-        target_feature = "sse2"
-    ))]
-    if !scalar_only {
-        #[cfg(any(feature = "std", target_feature = "avx2"))]
-        if has_avx2() {
+    macro_rules! run {
+        (neon) => {{
+            // SAFETY: the cfg guarantees `neon`. All reads stay in `w`.
+            unsafe { neon::check(w) }
+        }};
+        (avx2) => {{
             // SAFETY: just detected. All reads stay in `w`.
-            return unsafe { avx2::check(w) };
-        }
-        // SAFETY: the cfg guarantees `sse2`. All reads stay in `w`.
-        return unsafe { sse2::check(w) };
+            unsafe { avx2::check(w) }
+        }};
+        (sse2) => {{
+            // SAFETY: the cfg guarantees `sse2`. All reads stay in `w`.
+            unsafe { sse2::check(w) }
+        }};
+        (scalar) => {
+            scalar::check(w)
+        };
     }
 
-    // On a target with neither there is nothing to turn off.
-    #[cfg(not(any(
-        all(target_arch = "aarch64", target_feature = "neon"),
-        all(
-            any(target_arch = "x86", target_arch = "x86_64"),
-            target_feature = "sse2"
-        )
-    )))]
-    let _ = scalar_only;
-
-    scalar::check(w)
+    dispatch!(scalar_only, run)
 }
 
 #[cfg(test)]
@@ -374,6 +398,8 @@ mod tests {
     /// Names the form that disagrees with [`scalar::check`] on `w`, if one
     /// does. Only the forms that this build has are run.
     fn diverging_form(w: &Schedule) -> Option<&'static str> {
+        // A build with no vector form at all never reads this.
+        #[allow(unused_variables)]
         let want = scalar::check(w);
 
         #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
@@ -404,6 +430,38 @@ mod tests {
         }
 
         None
+    }
+
+    /// Names the form the dispatch picks. It runs the same cascade, so it
+    /// cannot name one [`ubc_check`] would not have run.
+    #[cfg(feature = "std")]
+    fn selected_form() -> &'static str {
+        macro_rules! name {
+            ($form:ident) => {
+                stringify!($form)
+            };
+        }
+
+        dispatch!(false, name)
+    }
+
+    /// `SHA1DC_EXPECT_UBC_CHECK` lets a job say which form it is there to
+    /// cover. `avx2` is the only one chosen at run time, and `sse2` is never
+    /// chosen where `avx2` exists, so without this either can go uncovered
+    /// while the job looks the same.
+    #[cfg(feature = "std")]
+    #[test]
+    fn the_expected_implementation_was_selected() {
+        let expected = std::env::var("SHA1DC_EXPECT_UBC_CHECK").unwrap_or_default();
+        let expected = expected.trim();
+        if expected.is_empty() {
+            return; // a job that does not pin one leaves it empty
+        }
+        assert_eq!(
+            selected_form(),
+            expected,
+            "this job was meant to exercise a different implementation of `ubc_check`"
+        );
     }
 
     /// Expands 16 words the way SHA-1 does, so that the schedule is one a
