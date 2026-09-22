@@ -37,7 +37,7 @@ report a detected attack as an error. The [documentation] covers both.
 ## Performance
 
 These figures compare the crate against two others: [`sha1`], which does no
-detection at all, and [`sha1-checked`], which is detects the same collisions and
+detection at all, and [`sha1-checked`], which detects the same collisions and
 is a direct translation of the original C code to Rust. Each is at the best it
 can do on the machine. The machines are an Apple M4 laptop, an EC2 c7i.xlarge
 and an EC2 c8g.xlarge. Throughput is in MiB/s, and as a fraction of the [`sha1`]
