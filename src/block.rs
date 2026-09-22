@@ -110,11 +110,6 @@ fn attacked(
         state_65,
     );
 
-    // The chaining value the partner starts from. It belongs to this call
-    // and not to the hasher, which never reads it again, and which nineteen
-    // blocks in twenty never get here to fill.
-    let mut ihv2 = [0u32; 5];
-
     // Walking the set bits visits only the candidates. Reading `mask_bit`
     // out of all 32 entries instead would touch the whole table, which is
     // ten kilobytes, to find the one or two that are flagged.
@@ -127,26 +122,32 @@ fn attacked(
         let dv = &crate::ubc_check::SHA1_DVS[bit];
         debug_assert_eq!(dv.mask_bit, bit as i32, "DV table is out of order");
 
-        let mut ends_on = [0u32; 5];
+        let from = match dv.recompress_from {
+            RecompressFrom::Step58 => &ctx.state_58,
+            RecompressFrom::Step65 => &ctx.state_65,
+        };
 
-        recompression_step(
-            dv.recompress_from,
-            &mut ihv2,
-            &mut ends_on,
-            &ctx.m1,
-            &dv.dm,
-            match dv.recompress_from {
-                RecompressFrom::Step58 => &ctx.state_58,
-                RecompressFrom::Step65 => &ctx.state_65,
-            },
-        );
-
-        // A collision on the way out is the attack. The option to accept one
-        // on the way in is for the reduced-step test vectors, which are the
-        // only real examples that exist for a shortened SHA-1.
-        if xor(&ends_on, &chaining_out) == 0
-            || (ctx.reduced_round_collision && xor(&ihv1, &ihv2) == 0)
-        {
+        // The reduced-step option asks a second question — whether the pair
+        // already collided on the way *in* — which needs the chaining value
+        // the partner started from whether or not this is an attack, and only
+        // the way back hands that over.
+        if ctx.reduced_round_collision {
+            // The chaining value the partner starts from. It belongs to this
+            // call and not to the hasher, which never reads it again.
+            let mut ihv2 = [0u32; 5];
+            let mut ends_on = [0u32; 5];
+            recompression_step(
+                dv.recompress_from,
+                &mut ihv2,
+                &mut ends_on,
+                &ctx.m1,
+                &dv.dm,
+                from,
+            );
+            if xor(&ends_on, &chaining_out) == 0 || xor(&ihv1, &ihv2) == 0 {
+                return true;
+            }
+        } else if backend.is_attack(dv.recompress_from, &ctx.m1, &dv.dm, from, &chaining_out) {
             return true;
         }
     }

@@ -8,6 +8,7 @@
 //! on a machine that has the instructions.
 
 use crate::block::rounds;
+use crate::ubc_check::RecompressFrom;
 use crate::{BLOCK_SIZE, Schedule};
 
 #[cfg(target_arch = "aarch64")]
@@ -140,6 +141,39 @@ impl Backend {
             return;
         }
         rounds::states_back_from_h(ihv_before, ihv_after, m1, need_58, state_58, state_65);
+    }
+
+    /// Whether this candidate really is the attack it is a candidate for.
+    ///
+    /// A backend with SHA-1 instructions asks it forwards, from the chaining
+    /// value an attack would have had to start from, since forwards is the
+    /// only direction they go. One without keeps to the way back, cheaper in
+    /// steps.
+    ///
+    /// Forwards runs all eighty rounds where the check reaches only step 58
+    /// or 65. The steps between are a bijection, so the two are the same
+    /// test, and the whole way needs no state taken out of the middle.
+    pub(crate) fn is_attack(
+        &self,
+        step: RecompressFrom,
+        m1: &Schedule,
+        dm: &[u32; 80],
+        state: &[u32; 5],
+        chaining_out: &[u32; 5],
+    ) -> bool {
+        match self.0 {
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            // SAFETY: `Repr::ShaNi` is chosen only where the instructions are.
+            Repr::ShaNi => unsafe { sha_ni::recompress(step, m1, dm, state, chaining_out) },
+            #[cfg(target_arch = "aarch64")]
+            // SAFETY: `Repr::Armv8` is chosen only where the instructions are.
+            Repr::Armv8 => unsafe { armv8::recompress(step, m1, dm, state, chaining_out) },
+            Repr::Scalar => {
+                let (mut ihv2, mut ends_on) = ([0u32; 5], [0u32; 5]);
+                rounds::recompression_step(step, &mut ihv2, &mut ends_on, m1, dm, state);
+                super::xor(&ends_on, chaining_out) == 0
+            }
+        }
     }
 }
 
@@ -282,6 +316,45 @@ mod tests {
     mod properties {
         use super::*;
         use quickcheck::QuickCheck;
+
+        /// A backend must accept exactly the chaining value the way back
+        /// finds, and no other.
+        ///
+        /// Accepting the output the way back arrived at takes computing that
+        /// value exactly. Rejecting anything else is what makes it mean
+        /// something: a form that always accepted would pass on its own.
+        #[test]
+        fn a_backend_accepts_only_what_the_way_back_finds() {
+            fn prop(words: [u32; 80], state: [u32; 5], nudge: u8) -> bool {
+                let backend = Backend::new();
+                let m1 = Schedule::from_words(words);
+                crate::ubc_check::SHA1_DVS.iter().all(|dv| {
+                    let (mut ihvin, mut ihvout) = ([0u32; 5], [0u32; 5]);
+                    rounds::recompression_step(
+                        dv.recompress_from,
+                        &mut ihvin,
+                        &mut ihvout,
+                        &m1,
+                        &dv.dm,
+                        &state,
+                    );
+
+                    let accepts =
+                        backend.is_attack(dv.recompress_from, &m1, &dv.dm, &state, &ihvout);
+
+                    // Any other output belongs to some other chaining value.
+                    let mut wrong = ihvout;
+                    wrong[nudge as usize % 5] ^= 1 << u32::from(nudge % 32);
+                    let rejects =
+                        !backend.is_attack(dv.recompress_from, &m1, &dv.dm, &state, &wrong);
+
+                    accepts && rejects
+                })
+            }
+            QuickCheck::new()
+                .tests(200)
+                .quickcheck(prop as fn([u32; 80], [u32; 5], u8) -> bool);
+        }
 
         /// The hardware backend and the scalar one must produce the same
         /// digest state and the same schedule for any block and any starting
