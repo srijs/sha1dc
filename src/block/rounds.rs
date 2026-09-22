@@ -294,7 +294,7 @@ pub(crate) fn states_back_from_h(
 /// This runs the 65 steps that lead to them and no more. It is the forward
 /// reference that [`states_back_from_h`] is checked against; the hardware
 /// path uses the backward form, which is fewer steps.
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(crate) fn states_from_w(
     ihv: &[u32; 5],
     w: &Schedule,

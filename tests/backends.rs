@@ -41,21 +41,6 @@ fn backends_agree_on_every_length() {
     }
 }
 
-/// A long message, so that both paths run the multi-block code.
-#[test]
-fn backends_agree_on_a_long_message() {
-    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
-    let data: Vec<u8> = (0..(1 << 18))
-        .map(|_| {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            (seed >> 24) as u8
-        })
-        .collect();
-    both(&data).expect("no collision");
-}
-
 /// A real collision runs `ensure_states` and the DV loop. The two backends
 /// differ there.
 #[test]

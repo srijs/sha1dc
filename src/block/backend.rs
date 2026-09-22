@@ -189,13 +189,6 @@ pub(crate) fn read_block(block: &[u8; BLOCK_SIZE], out: &mut [u32; BLOCK_SIZE / 
 mod tests {
     use super::*;
 
-    fn xorshift(seed: &mut u64) -> u64 {
-        *seed ^= *seed << 13;
-        *seed ^= *seed >> 7;
-        *seed ^= *seed << 17;
-        *seed
-    }
-
     fn is_hardware(backend: &Backend) -> bool {
         match backend.0 {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -258,58 +251,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn hardware_agrees_with_scalar_compression() {
-        let hardware = Backend::new();
-        if !is_hardware(&hardware) {
-            return;
-        }
-
-        let mut seed = 0x0BAD_C0DE_DEAD_BEEF;
-        for _ in 0..2_000 {
-            let block: [u8; BLOCK_SIZE] =
-                core::array::from_fn(|_| (xorshift(&mut seed) >> 24) as u8);
-            let ihv: [u32; 5] = core::array::from_fn(|_| xorshift(&mut seed) as u32);
-
-            let mut block_u32 = [0u32; 16];
-            read_block(&block, &mut block_u32);
-
-            let (mut hw_state, mut hw_w) = (ihv, Schedule::zeroed());
-            let (mut hw_s58, mut hw_s65) = ([0u32; 5], [0u32; 5]);
-            hardware.compress_spill(&mut hw_state, &block, &mut hw_w, &mut hw_s58, &mut hw_s65);
-
-            let mut sc_state = ihv;
-            let (mut sc_w, mut s58, mut s65) = (Schedule::zeroed(), [0u32; 5], [0u32; 5]);
-            Backend(Repr::Scalar).compress_spill(
-                &mut sc_state,
-                &block,
-                &mut sc_w,
-                &mut s58,
-                &mut s65,
-            );
-
-            assert_eq!(hw_state, sc_state, "digest diverged");
-            assert_eq!(hw_w.words(), sc_w.words(), "schedule diverged");
-
-            // Independent of the scalar round macros, so a common fault
-            // cannot hide.
-            let mut want = Schedule::zeroed();
-            for (t, word) in block_u32.iter().enumerate() {
-                want[t] = *word;
-            }
-            for t in 16..80 {
-                want[t] = (want[t - 3] ^ want[t - 8] ^ want[t - 14] ^ want[t - 16]).rotate_left(1);
-            }
-            assert_eq!(
-                hw_w.words(),
-                want.words(),
-                "schedule is not the standard expansion"
-            );
-        }
-    }
-
-    /// Property tests. The loops above run a fixed stream; these look for a
-    /// disagreement anywhere and shrink a failure to a small case.
+    /// Property tests. These look for a disagreement anywhere and shrink a
+    /// failure to a small case.
     ///
     /// `quickcheck` needs `std`, so a `no_std` build skips them.
     #[cfg(feature = "std")]
@@ -386,7 +329,11 @@ mod tests {
                     &mut s65,
                 );
 
-                hw_state == sc_state && hw_w.words() == sc_w.words()
+                let mut m = [0u32; 16];
+                read_block(&block, &mut m);
+                let want = Schedule::expand(&m);
+
+                hw_state == sc_state && hw_w.words() == sc_w.words() && hw_w.words() == want.words()
             }
 
             QuickCheck::new()
@@ -432,33 +379,6 @@ mod tests {
             QuickCheck::new()
                 .tests(1_000)
                 .quickcheck(prop as fn([u32; 16], [u32; 5]) -> bool);
-        }
-    }
-
-    /// State recovery replaces a full scalar run on the hardware path, so
-    /// both forms must give the same result.
-    #[test]
-    fn state_recovery_agrees_with_full_replay() {
-        let mut seed = 0xC0FF_EE00_1234_5678;
-        for _ in 0..2_000 {
-            let m: [u32; 16] = core::array::from_fn(|_| xorshift(&mut seed) as u32);
-            let ihv: [u32; 5] = core::array::from_fn(|_| xorshift(&mut seed) as u32);
-
-            let mut replayed = ihv;
-            let (mut w, mut want_58, mut want_65) = (Schedule::zeroed(), [0u32; 5], [0u32; 5]);
-            scalar::compress_spill(&mut replayed, &m, &mut w, &mut want_58, &mut want_65);
-
-            let (mut got_58, mut got_65) = ([0u32; 5], [0u32; 5]);
-            rounds::states_from_w(&ihv, &w, &mut got_58, &mut got_65);
-
-            assert_eq!(got_58, want_58, "state_58 diverged");
-            assert_eq!(got_65, want_65, "state_65 diverged");
-
-            let (mut back_58, mut back_65) = ([0u32; 5], [0u32; 5]);
-            rounds::states_back_from_h(&ihv, &replayed, &w, true, &mut back_58, &mut back_65);
-
-            assert_eq!(back_58, want_58, "state_58 diverged running backwards");
-            assert_eq!(back_65, want_65, "state_65 diverged running backwards");
         }
     }
 }

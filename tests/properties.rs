@@ -11,7 +11,7 @@
 
 use quickcheck::{Gen, QuickCheck};
 use sha1::Digest as _;
-use sha1dc::Hasher;
+use sha1dc::{Collision, Digest, Hasher};
 
 /// Long enough for several blocks, so that padding and the block loop both
 /// run.
@@ -20,6 +20,15 @@ const LONG: usize = 4 * 1024;
 /// Enough chunks to cross the internal buffer repeatedly, without making the
 /// message so long that the test crawls.
 const CHUNKED: usize = 64;
+
+/// Hashes the parts with one `update` each.
+fn hash_in_parts<'a>(parts: impl IntoIterator<Item = &'a [u8]>) -> Result<Digest, Collision> {
+    let mut hasher = Hasher::new();
+    for part in parts {
+        hasher.update(part);
+    }
+    hasher.finalize()
+}
 
 /// A machine with the SHA-1 instructions never runs the scalar path, so only
 /// a comparison against it can find a difference between the two.
@@ -63,19 +72,26 @@ fn the_ubc_filter_does_not_change_the_digest() {
 #[test]
 fn chunked_updates_match_one_shot() {
     fn prop(chunks: Vec<Vec<u8>>) -> bool {
-        let whole: Vec<u8> = chunks.concat();
-
-        let mut hasher = Hasher::new();
-        for chunk in &chunks {
-            hasher.update(chunk);
-        }
-
-        hasher.finalize() == sha1dc::digest(&whole)
+        hash_in_parts(chunks.iter().map(Vec::as_slice)) == sha1dc::digest(&chunks.concat())
     }
     QuickCheck::new()
         .rng(Gen::new(CHUNKED))
         .tests(2_000)
         .quickcheck(prop as fn(Vec<Vec<u8>>) -> bool);
+}
+
+/// The same, with chunks longer than [`chunked_updates_match_one_shot`]
+/// generates. Equal chunks longer than a block alternate between filling the
+/// buffer and compressing straight from the input.
+#[test]
+fn fixed_size_chunks_match_one_shot() {
+    fn prop(data: Vec<u8>, chunk: usize) -> bool {
+        hash_in_parts(data.chunks(1 + chunk % 1024)) == sha1dc::digest(&data)
+    }
+    QuickCheck::new()
+        .rng(Gen::new(LONG))
+        .tests(1_000)
+        .quickcheck(prop as fn(Vec<u8>, usize) -> bool);
 }
 
 /// On a message that carries no attack, the digest must match an ordinary
