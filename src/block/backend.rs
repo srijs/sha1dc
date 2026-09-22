@@ -172,6 +172,36 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "std")]
+    fn name(backend: &Backend) -> &'static str {
+        match backend.0 {
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            Repr::ShaNi => "sha-ni",
+            #[cfg(target_arch = "aarch64")]
+            Repr::Armv8 => "armv8",
+            Repr::Scalar => "scalar",
+        }
+    }
+
+    /// `SHA1DC_EXPECT_BLOCK` lets a job say which implementation it is there
+    /// to cover. A runner without the SHA-1 instructions falls back to the
+    /// scalar one and looks no different, so without this `sha_ni` can go a
+    /// whole release without running.
+    #[cfg(feature = "std")]
+    #[test]
+    fn the_expected_implementation_was_selected() {
+        let expected = std::env::var("SHA1DC_EXPECT_BLOCK").unwrap_or_default();
+        let expected = expected.trim();
+        if expected.is_empty() {
+            return; // a job that does not pin one leaves it empty
+        }
+        assert_eq!(
+            name(&Backend::new()),
+            expected,
+            "this job was meant to exercise a different implementation of `block`"
+        );
+    }
+
     /// Detects a silent fallback to scalar. If the compiler knows that the
     /// instructions are present, detection must agree.
     #[test]
