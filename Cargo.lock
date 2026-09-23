@@ -462,6 +462,7 @@ name = "sha1dc-bench"
 version = "0.0.0"
 dependencies = [
  "criterion",
+ "rand",
  "sha1",
  "sha1-checked",
  "sha1dc",

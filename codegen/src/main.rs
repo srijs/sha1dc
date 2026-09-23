@@ -58,42 +58,29 @@ use std::process::{Command, ExitCode, Stdio};
 /// many groups the prefix may spend. A group runs on every block, so the
 /// budget trades unconditional work against the guarded tail.
 ///
-/// Every target has its own optimum, measured on an Apple M4, a Xeon Platinum
-/// 8488C and a Graviton4. The scalar form has no lanes, so a group is one
-/// statement and it wants far fewer of them. The two four-lane forms share a
-/// plan because the lane count is all the solver sees.
-///
-/// These budgets belong to the measure [`solve`] uses. Spending on coverage
-/// wanted a long prefix, because the last group still bought something;
-/// spending on how often the tail runs does not, because by then every DV is
-/// deep enough that another group buys almost nothing and still costs a pair
-/// of loads on every block. So the vector budgets come down from 22, which
-/// was tuned against the old measure, and the scalar one rises from 40 but
-/// not as far as the old measure would suggest.
-///
-/// Re-measure all of them when the solver changes. The four-lane number
-/// matters most: on a Graviton4 the old 22 gives 1.07 GiB/s against 1.23 at
-/// 17, and the three machines disagree by less than a percent about 17.
+/// Every target has its own optimum, measured with `bench/` on an Apple M4, a
+/// Xeon Platinum 8488C and a Graviton4. Re-measure them when the solver or an
+/// emitter changes.
 const TARGETS: &[Target] = &[
     Target {
         name: "scalar",
         width: 1,
-        groups: 45,
+        groups: 70,
     },
     Target {
         name: "neon",
         width: 4,
-        groups: 17,
+        groups: 20,
     },
     Target {
         name: "sse2",
         width: 4,
-        groups: 17,
+        groups: 26,
     },
     Target {
         name: "avx2",
         width: 8,
-        groups: 10,
+        groups: 14,
     },
 ];
 
@@ -164,16 +151,10 @@ fn generate(tuned: bool) -> io::Result<Vec<(String, String)>> {
             (target.width, target.groups)
         };
 
-        let plan = solve::solve(width, groups);
-        let prefix = match target.name {
-            "scalar" => scalar::emit(&plan),
-            "neon" => neon::emit(&plan),
-            "sse2" => sse2::emit(&plan),
-            "avx2" => avx2::emit(&plan),
-            other => panic!("no emitter for {other}"),
-        };
-        let source = emit::module(target.name, &prefix, &tail::emit(&plan));
-        files.push((format!("{}.rs", target.name), rustfmt(&source)?));
+        files.push((
+            format!("{}.rs", target.name),
+            rustfmt(&form(target.name, width, groups))?,
+        ));
     }
 
     // Not a form of the check: the published conditions, which the tests
@@ -181,6 +162,19 @@ fn generate(tuned: bool) -> io::Result<Vec<(String, String)>> {
     files.push(("conditions.rs".to_owned(), rustfmt(&conditions::emit())?));
 
     Ok(files)
+}
+
+/// One form of the check, before formatting.
+fn form(name: &str, width: usize, groups: usize) -> String {
+    let plan = solve::solve(width, groups);
+    let prefix = match name {
+        "scalar" => scalar::emit(&plan),
+        "neon" => neon::emit(&plan),
+        "sse2" => sse2::emit(&plan),
+        "avx2" => avx2::emit(&plan),
+        other => panic!("no emitter for {other}"),
+    };
+    emit::module(name, &prefix, &tail::emit(&plan))
 }
 
 fn write(dir: &Path) -> io::Result<()> {
@@ -311,6 +305,23 @@ fn report() {
                 plan.tail.len() - shared,
                 plan.prefix_ranks.iter().min().unwrap(),
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every target emits source at the extremes of its budget: no prefix
+    /// at all, and one so large that the tail is left with nothing.
+    #[test]
+    fn every_budget_emits_valid_source() {
+        for target in TARGETS {
+            for groups in [0, 1, 100] {
+                rustfmt(&form(target.name, target.width, groups))
+                    .unwrap_or_else(|e| panic!("{} at {groups} groups: {e}", target.name));
+            }
         }
     }
 }
