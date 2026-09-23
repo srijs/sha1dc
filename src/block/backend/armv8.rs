@@ -77,7 +77,13 @@ fn store_abcd(state: &mut [u32; 5], v: uint32x4_t) {
     clippy::too_many_lines,
     reason = "the block compression is one unrolled body"
 )]
-pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Schedule) {
+pub(crate) fn compress_spill(
+    state: &mut [u32; 5],
+    block: &[u8; 64],
+    w: &mut Schedule,
+    at_60: &mut [u32; 5],
+    at_64: &mut [u32; 5],
+) {
     let mut abcd = load_abcd(state);
     let mut e0 = state[4];
     let abcd_in = abcd;
@@ -224,6 +230,10 @@ pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Sch
     spill::<68>(w, msg1);
     msg2 = vsha1su0q_u32(msg2, msg3, msg0);
 
+    // The state at step 60, for the check to start from.
+    store_abcd(at_60, abcd);
+    at_60[4] = e1;
+
     // Rounds 60-63
     e0 = vsha1h_u32(vgetq_lane_u32(abcd, 0));
     abcd = vsha1pq_u32(abcd, e1, tmp1);
@@ -231,6 +241,10 @@ pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Sch
     msg2 = vsha1su1q_u32(msg2, msg1);
     spill::<72>(w, msg2);
     msg3 = vsha1su0q_u32(msg3, msg0, msg1);
+
+    // And at step 64.
+    store_abcd(at_64, abcd);
+    at_64[4] = e0;
 
     // Rounds 64-67
     e1 = vsha1h_u32(vgetq_lane_u32(abcd, 0));

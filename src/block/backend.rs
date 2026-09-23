@@ -86,8 +86,9 @@ impl Backend {
     /// Digests `block` into `state` and writes the input of the checker to
     /// `m1`.
     ///
-    /// This can leave `state_58` and `state_65` unset. Call
-    /// [`ensure_states`](Self::ensure_states) before you read them.
+    /// A hardware backend leaves its own states at steps 60 and 64 in
+    /// `state_58` and `state_65`. Call [`ensure_states`](Self::ensure_states)
+    /// before you read them.
     #[inline]
     pub(crate) fn compress_spill(
         &self,
@@ -101,12 +102,12 @@ impl Backend {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
             Repr::ShaNi => {
                 // SAFETY: `Repr::ShaNi` means the features were checked.
-                unsafe { sha_ni::compress_spill(state, block, m1) };
+                unsafe { sha_ni::compress_spill(state, block, m1, state_58, state_65) };
             }
             #[cfg(target_arch = "aarch64")]
             Repr::Armv8 => {
                 // SAFETY: `Repr::Armv8` means the features were checked.
-                unsafe { armv8::compress_spill(state, block, m1) };
+                unsafe { armv8::compress_spill(state, block, m1, state_58, state_65) };
             }
             // Only this arm decodes the block. The other two byte-swap in
             // their own loads, and the buffer stays here rather than moving
@@ -124,24 +125,34 @@ impl Backend {
     /// Updates the stored states this block's candidates will recompress
     /// from.
     ///
-    /// The hardware backends write out the message schedule but not the
-    /// intermediate states. This recovers them from the schedule and the two
-    /// chaining values, running backwards from the end, and does not run the
-    /// compression again. It runs only for a flagged block. `need_58` says
-    /// whether any candidate recompresses from step 58.
+    /// The scalar backend stores them on the way past. A hardware backend
+    /// works four steps at a time, so it stores its states at steps 60 and 64
+    /// instead, and this takes them the rest of the way. It runs only for a
+    /// flagged block. `need_58` says whether any candidate recompresses from
+    /// step 58.
     pub(crate) fn ensure_states(
         &self,
-        ihv_before: &[u32; 5],
-        ihv_after: &[u32; 5],
         m1: &Schedule,
         need_58: bool,
         state_58: &mut [u32; 5],
         state_65: &mut [u32; 5],
     ) {
-        if matches!(self.0, Repr::Scalar) {
-            return;
+        match self.0 {
+            // The compression stored them itself.
+            Repr::Scalar => {
+                let _ = (m1, need_58, state_58, state_65);
+            }
+            // As `sha1rnds4` holds them: reversed, with E + W on the end.
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            Repr::ShaNi => {
+                for (s, t) in [(&mut *state_58, 60), (&mut *state_65, 64)] {
+                    *s = [s[3], s[2], s[1], s[0], s[4].wrapping_sub(m1[t])];
+                }
+                rounds::states_from_60_64(m1, need_58, state_58, state_65);
+            }
+            #[cfg(target_arch = "aarch64")]
+            Repr::Armv8 => rounds::states_from_60_64(m1, need_58, state_58, state_65),
         }
-        rounds::states_back_from_h(ihv_before, ihv_after, m1, need_58, state_58, state_65);
     }
 
     /// Whether this candidate really is the attack it is a candidate for.
@@ -335,7 +346,13 @@ mod tests {
                 read_block(&block, &mut m);
                 let want = Schedule::expand(&m);
 
-                hw_state == sc_state && hw_w.words() == sc_w.words() && hw_w.words() == want.words()
+                Backend::new().ensure_states(&hw_w, true, &mut hw_s58, &mut hw_s65);
+
+                hw_state == sc_state
+                    && hw_w.words() == sc_w.words()
+                    && hw_w.words() == want.words()
+                    && hw_s58 == s58
+                    && hw_s65 == s65
             }
 
             QuickCheck::new()
@@ -343,8 +360,9 @@ mod tests {
                 .quickcheck(prop as fn([u8; BLOCK_SIZE], [u32; 5]) -> bool);
         }
 
-        /// Both state recoveries must match a full scalar run for any
-        /// schedule the hardware path can leave behind.
+        /// The stored states must match a plain run of the compression, both
+        /// the scalar backend's and those a hardware backend's are finished
+        /// into, for any block and starting state.
         #[test]
         fn state_recovery_agrees_on_any_block() {
             fn prop(m: [u32; 16], ihv: [u32; 5]) -> bool {
@@ -352,28 +370,22 @@ mod tests {
                 let (mut w, mut want_58, mut want_65) = (Schedule::zeroed(), [0u32; 5], [0u32; 5]);
                 scalar::compress_spill(&mut replayed, &m, &mut w, &mut want_58, &mut want_65);
 
-                let (mut got_58, mut got_65) = ([0u32; 5], [0u32; 5]);
-                rounds::states_from_w(&ihv, &w, &mut got_58, &mut got_65);
-
-                let (mut back_58, mut back_65) = ([0u32; 5], [0u32; 5]);
-                rounds::states_back_from_h(&ihv, &replayed, &w, true, &mut back_58, &mut back_65);
+                // What a hardware backend stores, finished the way it is
+                // finished there. Written out here so that every target runs
+                // it, not only one with the instructions.
+                let at = |t| rounds::state_at(&ihv, &w, t);
+                let (mut from_60, mut from_64) = (at(60), at(64));
+                rounds::states_from_60_64(&w, true, &mut from_60, &mut from_64);
 
                 // Asking for step 65 alone must leave step 58 untouched and
                 // still give step 65.
-                let (mut skipped_58, mut only_65) = ([0xDEAD_BEEFu32; 5], [0u32; 5]);
-                rounds::states_back_from_h(
-                    &ihv,
-                    &replayed,
-                    &w,
-                    false,
-                    &mut skipped_58,
-                    &mut only_65,
-                );
+                let (mut skipped_58, mut only_65) = ([0xDEAD_BEEFu32; 5], at(64));
+                rounds::states_from_60_64(&w, false, &mut skipped_58, &mut only_65);
 
-                got_58 == want_58
-                    && got_65 == want_65
-                    && back_58 == want_58
-                    && back_65 == want_65
+                at(58) == want_58
+                    && at(65) == want_65
+                    && from_60 == want_58
+                    && from_64 == want_65
                     && only_65 == want_65
                     && skipped_58 == [0xDEAD_BEEF; 5]
             }
