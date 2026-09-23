@@ -14,3 +14,7 @@ sha1dc = { path = ".." }
 [[bench]]
 name = "throughput"
 harness = false
+
+[[bench]]
+name = "small"
+harness = false

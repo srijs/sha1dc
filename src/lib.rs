@@ -309,11 +309,6 @@ struct Inner {
     reduced_round_collision: bool,
     /// True if a collision occurred.
     found_collision: bool,
-    /// This block's expanded message schedule.
-    m1: Schedule,
-    /// Earlier states, which make recompression faster.
-    state_58: [u32; STATE_LEN],
-    state_65: [u32; STATE_LEN],
 }
 
 impl Inner {
@@ -333,9 +328,6 @@ impl Inner {
             ubc_check: builder.ubc_check,
             reduced_round_collision: builder.reduced_round_collisions,
             found_collision: false,
-            m1: Schedule::zeroed(),
-            state_58: [0; STATE_LEN],
-            state_65: [0; STATE_LEN],
         }
     }
 
@@ -373,9 +365,6 @@ impl Inner {
         self.buffer_len = 0;
         // Keep the configuration.
         self.found_collision = false;
-        self.m1 = Schedule::zeroed();
-        self.state_58 = [0; STATE_LEN];
-        self.state_65 = [0; STATE_LEN];
     }
 
     /// Finishes and reports whether a collision occurred. The caller's own
