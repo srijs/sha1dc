@@ -115,12 +115,10 @@ fn attacked(
     reduced_round_collision: bool,
     candidates: u32,
 ) -> bool {
-    // The hardware backends give the schedule but not the states that
-    // recompression starts from, so they are recovered here, once, and only
-    // for a block that has a candidate at all.
+    // A hardware backend stores its states four steps from the ones
+    // recompression starts from; they are finished here, once, and only for a
+    // block that has a candidate at all.
     backend.ensure_states(
-        &ihv1,
-        &chaining_out,
         &s.m1,
         candidates & crate::ubc_check::STEP58_MASK != 0,
         &mut s.state_58,

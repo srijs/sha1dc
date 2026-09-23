@@ -92,7 +92,13 @@ fn store_abcd(state: &mut [u32; 5], abcd: __m128i) {
 /// prove the features needs an `unsafe` block.
 #[inline]
 #[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
-pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Schedule) {
+pub(crate) fn compress_spill(
+    state: &mut [u32; 5],
+    block: &[u8; 64],
+    w: &mut Schedule,
+    at_60: &mut [u32; 5],
+    at_64: &mut [u32; 5],
+) {
     /// One group of four rounds, once the schedule is under way.
     ///
     /// `ready` holds the words these rounds use. `next` is finished here,
@@ -106,6 +112,22 @@ pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Sch
         ) => {{
             spill::<$t>($w, $ready);
             $live = _mm_sha1nexte_epu32($live, $ready);
+            $held = $abcd;
+            $next = _mm_sha1msg2_epu32($next, $ready);
+            $abcd = _mm_sha1rnds4_epu32($abcd, $live, $k);
+            $first = _mm_sha1msg1_epu32($first, $ready);
+            $second = _mm_xor_si128($second, $ready);
+        }};
+        (
+            $w:expr, $t:literal, $k:expr, $abcd:ident, $live:ident, $held:ident,
+            $ready:ident, $next:ident, $second:ident, $first:ident => $at:ident
+        ) => {{
+            spill::<$t>($w, $ready);
+            $live = _mm_sha1nexte_epu32($live, $ready);
+            // As held: `abcd` reversed in the first four words, and E + W in
+            // the fifth, from the top of a store one word further on.
+            store_u32x4((&mut $at[1..5]).try_into().unwrap(), $live);
+            store_u32x4($at.first_chunk_mut().unwrap(), $abcd);
             $held = $abcd;
             $next = _mm_sha1msg2_epu32($next, $ready);
             $abcd = _mm_sha1rnds4_epu32($abcd, $live, $k);
@@ -169,8 +191,8 @@ pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Sch
     group!(w, 48, 2, abcd, e0, e1, msg0, msg1, msg2, msg3);
     group!(w, 52, 2, abcd, e1, e0, msg1, msg2, msg3, msg0);
     group!(w, 56, 2, abcd, e0, e1, msg2, msg3, msg0, msg1);
-    group!(w, 60, 3, abcd, e1, e0, msg3, msg0, msg1, msg2);
-    group!(w, 64, 3, abcd, e0, e1, msg0, msg1, msg2, msg3);
+    group!(w, 60, 3, abcd, e1, e0, msg3, msg0, msg1, msg2 => at_60);
+    group!(w, 64, 3, abcd, e0, e1, msg0, msg1, msg2, msg3 => at_64);
 
     // The last words are already in hand, so the expansion stops one step at
     // a time.
