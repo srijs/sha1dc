@@ -22,6 +22,7 @@ pub fn emit(plan: &Plan) -> String {
 /// The checks that run on every block. Requires `sse2`.
 ///
 /// The highest index read is {HIGH}, and every load proves its own bound.
+#[inline]
 #[target_feature(enable = "sse2")]
 fn prefix(w: &Schedule) -> u32 {
     let zero = _mm_setzero_si128();

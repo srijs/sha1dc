@@ -11,6 +11,8 @@
 //! because it is per DV: solving the entries for one DV gives a message
 //! that keeps that DV alive, and so reaches the checks behind it.
 
+#![forbid(unsafe_code)]
+
 /// The conditions, in the order they were published.
 pub(super) const CONDITIONS: [(u8, u8, u8, u8, u8, u32); 156] = [
     (35, 1, 36, 6, 1, 0x00000410),

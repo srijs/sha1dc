@@ -66,6 +66,7 @@ static TAIL_SPANS: [(u16, u8); 32] = [
 ];
 
 /// The checks the prefix leaves. `mask` is never zero here.
+#[inline]
 fn tail(w: &Schedule, mask: u32) -> u32 {{
     let mut out = mask;
     let mut rest = mask;

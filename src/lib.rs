@@ -44,6 +44,7 @@ use core::fmt;
 pub mod mitigate;
 
 mod block;
+mod mem;
 mod ubc_check;
 
 use block::Backend;
@@ -104,6 +105,13 @@ impl Schedule {
         w
     }
 
+    /// The words as they are stored, for the property tests that compare two
+    /// whole schedules.
+    #[cfg(all(test, feature = "std"))]
+    pub(crate) const fn words(&self) -> &[u32; SCHEDULE_LEN] {
+        &self.0
+    }
+
     /// Whether the array runs backwards.
     pub(crate) const MIRRORED: bool = cfg!(any(target_arch = "x86", target_arch = "x86_64"));
 
@@ -128,24 +136,31 @@ impl Schedule {
 /// filter.
 #[allow(dead_code, reason = "a target without either kind calls none of these")]
 impl Schedule {
-    /// The words as they are stored, for the generated vector forms.
+    /// The `N` words of steps `T..T + N`, as they are stored: a mirrored
+    /// layout hands them back in the other order.
+    ///
+    /// `T` and `N` are const parameters, so a window past the end of the
+    /// schedule is a compile error at the call site, and the bounds check
+    /// folds away.
     #[inline(always)]
-    pub(crate) const fn words(&self) -> &[u32; SCHEDULE_LEN] {
-        &self.0
+    pub(crate) fn window<const T: usize, const N: usize>(&self) -> &[u32; N] {
+        let at = const { Self::window_start(T, N) };
+        self.0[at..at + N].try_into().unwrap()
     }
 
     /// The same, for a backend writing a whole window.
     #[inline(always)]
-    pub(crate) const fn words_mut(&mut self) -> &mut [u32; SCHEDULE_LEN] {
-        &mut self.0
+    pub(crate) fn window_mut<const T: usize, const N: usize>(&mut self) -> &mut [u32; N] {
+        let at = const { Self::window_start(T, N) };
+        (&mut self.0[at..at + N]).try_into().unwrap()
     }
 
     /// Where a window of `n` consecutive steps starting at `t` begins.
     ///
     /// A run of steps is a run of words either way round; a mirrored one
     /// starts at the other end.
-    #[inline(always)]
-    pub(crate) const fn window(t: usize, n: usize) -> usize {
+    const fn window_start(t: usize, n: usize) -> usize {
+        assert!(t + n <= SCHEDULE_LEN, "the window runs past the schedule");
         if Self::MIRRORED {
             SCHEDULE_LEN - n - t
         } else {
@@ -345,14 +360,14 @@ impl Inner {
                 return;
             }
             let block = self.buffer;
-            self.compress(&[block]);
+            self.compress(&block);
             self.buffer_len = 0;
         }
 
         let blocks = data.len() / BLOCK_SIZE;
         let (full, rest) = data.split_at(blocks * BLOCK_SIZE);
         if blocks > 0 {
-            self.compress(as_blocks(full));
+            self.compress(full);
         }
         self.buffer[..rest.len()].copy_from_slice(rest);
         self.buffer_len = rest.len();
@@ -374,8 +389,10 @@ impl Inner {
         (digest, self.found_collision)
     }
 
-    fn compress(&mut self, blocks: &[[u8; BLOCK_SIZE]]) {
-        block::compress(self, blocks);
+    /// Compresses `data`, whose length is a multiple of `BLOCK_SIZE`.
+    fn compress(&mut self, data: &[u8]) {
+        debug_assert_eq!(data.len() % BLOCK_SIZE, 0);
+        block::compress(self, data);
     }
 
     /// Pads the message and compresses the final block(s).
@@ -392,13 +409,13 @@ impl Inner {
 
         if pos + 1 > BLOCK_SIZE - 8 {
             let block = self.buffer;
-            self.compress(&[block]);
+            self.compress(&block);
             self.buffer.fill(0);
         }
 
         self.buffer[BLOCK_SIZE - 8..].copy_from_slice(&bit_len.to_be_bytes());
         let block = self.buffer;
-        self.compress(&[block]);
+        self.compress(&block);
 
         let mut out = [0u8; DIGEST_SIZE];
         for (chunk, v) in out.chunks_exact_mut(4).zip(self.h.iter()) {
@@ -515,15 +532,6 @@ impl Hasher {
     pub fn builder() -> Builder {
         Builder::new()
     }
-}
-
-/// Reinterprets a slice whose length is a multiple of `BLOCK_SIZE` as blocks.
-#[inline]
-fn as_blocks(data: &[u8]) -> &[[u8; BLOCK_SIZE]] {
-    debug_assert_eq!(data.len() % BLOCK_SIZE, 0);
-    // SAFETY: `[u8; BLOCK_SIZE]` has the same alignment as `u8` and the size of
-    // `BLOCK_SIZE` contiguous `u8`s, and `data` holds an exact number of them.
-    unsafe { core::slice::from_raw_parts(data.as_ptr().cast(), data.len() / BLOCK_SIZE) }
 }
 
 /// Configures a hasher's collision detection.

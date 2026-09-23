@@ -30,6 +30,7 @@ pub fn emit(plan: &Plan) -> String {
 /// The checks that run on every block. Requires `neon`.
 ///
 /// The highest index read is {HIGH}, and every load proves its own bound.
+#[inline]
 #[target_feature(enable = "neon")]
 fn prefix(w: &Schedule) -> u32 {
     let mut acc0 = vdupq_n_u32(0);

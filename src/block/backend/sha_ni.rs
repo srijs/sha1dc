@@ -21,6 +21,7 @@ use core::arch::x86_64::*;
 
 use crate::Schedule;
 use crate::block::rounds;
+use crate::mem::{load_u8x16, load_u32x4, store_u32x4};
 use crate::ubc_check::RecompressFrom;
 
 /// SHA-NI holds the four words of a group in the opposite order to the
@@ -38,75 +39,58 @@ const REVERSE: i32 = 0b00_01_10_11;
 #[inline]
 #[target_feature(enable = "sse2")]
 fn spill<const I: usize>(w: &mut Schedule, msg: __m128i) {
-    const { assert!(I + 4 <= 80, "the spill runs past the schedule") }
-    // SAFETY: the const assert above proves `I + 4 <= 80`, so the mirrored
-    // window `w[76 - I..80 - I]` is in bounds, which is all this writes.
-    unsafe {
-        _mm_storeu_si128(
-            w.words_mut()
-                .as_mut_ptr()
-                .add(Schedule::window(I, 4))
-                .cast(),
-            msg,
-        )
-    }
+    store_u32x4(w.window_mut::<I, 4>(), msg);
 }
 
 /// The four message words starting at byte `I`, in native order.
+///
+/// `I` is a const parameter, so a load past the end of the block is a compile
+/// error at the call site.
 #[inline]
 #[target_feature(enable = "sse2,ssse3")]
 fn msg<const I: usize>(block: &[u8; 64], swap: __m128i) -> __m128i {
     const { assert!(I + 16 <= 64, "the load runs past the block") }
-    // SAFETY: the const assert above proves `block[I..I + 16]` is in bounds,
-    // which is the whole of what this reads.
-    let raw = unsafe { _mm_loadu_si128(block.as_ptr().add(I).cast()) };
+    let raw = load_u8x16(block[I..I + 16].try_into().unwrap());
     _mm_shuffle_epi8(raw, swap)
 }
 
-/// The four schedule words of group `G`, exclusive-ored with the partner's
-/// difference, in the order the rounds want them.
+/// The four schedule words of steps `T..T + 4`, exclusive-ored with the
+/// partner's difference, in the order the rounds want them.
 ///
-/// The read side of [`spill`], with `G` const for the same reason: a group
-/// past the end is a compile error rather than a promise in a comment.
-///
-/// The spill is already reversed, being mirrored for that reason; the
-/// difference table is in step order, so it is the one that turns round.
+/// The read side of [`spill`], with `T` const for the same reason. The spill is already reversed, being mirrored
+/// for that reason; the difference table is in step order, so it is the one
+/// that turns round.
 #[inline]
 #[target_feature(enable = "sse2,ssse3")]
-fn words<const G: usize>(m1: &Schedule, dm: &[u32; 80]) -> __m128i {
-    const { assert!(4 * G + 4 <= 80, "the group runs past the schedule") }
-    // SAFETY: the const assert above proves both reads are four words inside
-    // an array of eighty.
-    unsafe {
-        let at = m1.words().as_ptr().add(Schedule::window(4 * G, 4));
-        let spilled = _mm_loadu_si128(at.cast());
-        let diff = _mm_loadu_si128(dm.as_ptr().add(4 * G).cast());
-        _mm_xor_si128(spilled, _mm_shuffle_epi32(diff, REVERSE))
-    }
+fn words<const T: usize>(m1: &Schedule, dm: &[u32; 80]) -> __m128i {
+    const { assert!(T + 4 <= 80, "the group runs past the schedule") }
+    let spilled = load_u32x4(m1.window::<T, 4>());
+    let diff = load_u32x4(dm[T..T + 4].try_into().unwrap());
+    _mm_xor_si128(spilled, _mm_shuffle_epi32(diff, REVERSE))
 }
 
 /// The `abcd` half of the state. The fifth word is carried on its own.
 #[inline]
 #[target_feature(enable = "sse2")]
 fn load_abcd(state: &[u32; 5]) -> __m128i {
-    // SAFETY: `_mm_loadu_si128` reads four words, and `state` has five.
-    let raw = unsafe { _mm_loadu_si128(state.as_ptr().cast()) };
-    _mm_shuffle_epi32(raw, REVERSE)
+    _mm_shuffle_epi32(load_u32x4(state.first_chunk().unwrap()), REVERSE)
 }
 
 /// Writes `abcd` back, leaving the fifth word alone.
 #[inline]
 #[target_feature(enable = "sse2")]
 fn store_abcd(state: &mut [u32; 5], abcd: __m128i) {
-    let ordered = _mm_shuffle_epi32(abcd, REVERSE);
-    // SAFETY: `_mm_storeu_si128` writes four words, and `state` has five.
-    unsafe { _mm_storeu_si128(state.as_mut_ptr().cast(), ordered) }
+    store_u32x4(
+        state.first_chunk_mut().unwrap(),
+        _mm_shuffle_epi32(abcd, REVERSE),
+    );
 }
 
 /// Compresses one block, spilling the message schedule into `w`.
 ///
 /// Requires `sha`, `sse2`, `ssse3` and `sse4.1`, so a caller that cannot
 /// prove the features needs an `unsafe` block.
+#[inline]
 #[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
 pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Schedule) {
     /// One group of four rounds, once the schedule is under way.
@@ -223,6 +207,7 @@ pub(crate) fn compress_spill(state: &mut [u32; 5], block: &[u8; 64], w: &mut Sch
 /// handed in, so it never leaves the vector registers.
 ///
 /// [`Backend::is_attack`]: crate::block::Backend::is_attack
+#[inline]
 #[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
 pub(crate) fn recompress(
     step: RecompressFrom,
@@ -250,7 +235,7 @@ pub(crate) fn recompress(
     /// to carry, only words to read.
     macro_rules! group {
         ($g:expr, $k:expr, $live:ident, $held:ident) => {{
-            let ready = words::<$g>(m1, dm);
+            let ready = words::<{ 4 * $g }>(m1, dm);
             $live = _mm_sha1nexte_epu32($live, ready);
             $held = abcd;
             abcd = _mm_sha1rnds4_epu32(abcd, $live, $k);
