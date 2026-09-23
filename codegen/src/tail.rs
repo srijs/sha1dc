@@ -32,6 +32,18 @@ pub fn emit(plan: &Plan) -> String {
         spans.push(format!("({start}, {})", list.len()));
     }
 
+    // A budget large enough puts every check in the prefix, and then the
+    // tables would be empty: nothing to read and nothing left to rule out.
+    if checks.is_empty() {
+        return r#"
+/// The prefix checks everything, so the mask is already final.
+fn tail(_: &Schedule, mask: u32) -> u32 {
+    mask
+}
+"#
+        .to_owned();
+    }
+
     let mut out = String::new();
     let _ = write!(
         out,

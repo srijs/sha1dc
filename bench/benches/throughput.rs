@@ -23,80 +23,114 @@
 
 use std::hint::black_box;
 
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
+use rand::rngs::SmallRng;
+use rand::{RngExt as _, SeedableRng as _};
 use sha1::Digest as _;
 
 /// One iteration hashes this many bytes. Large enough that constructing the
 /// hasher and padding the last block stay under a percent of the work.
 const CHUNK: usize = 16 * 1024;
 
-fn throughput(c: &mut Criterion) {
-    let data = pseudorandom(CHUNK);
+/// Fresh data for every iteration, made outside the timed part.
+///
+/// Hashing one buffer over and over lets the branch predictor learn which of
+/// its blocks enter the UBC tail and which recompress, and those branches are
+/// most of what the tail costs. On an Apple M4 that made `sha1dc` look 14%
+/// faster than on data that does not repeat, and favoured a shorter prefix
+/// than real data wants.
+/// Cycling through a larger pool is not enough: the M4 still learns much of
+/// a megabyte, and a pool large enough to defeat it no longer fits in L2. So
+/// the data never repeats, and each input is still hashed from cache.
+///
+/// Seeded, so that a run is repeatable for a given lockfile. Only the
+/// statistics of the data matter to the measurement, not its exact bytes.
+fn fresh() -> impl FnMut() -> Vec<u8> {
+    let mut rng = SmallRng::seed_from_u64(0x0123_4567_89ab_cdef);
+    move || {
+        let mut data = vec![0; CHUNK];
+        rng.fill(&mut data[..]);
+        data
+    }
+}
 
+fn throughput(c: &mut Criterion) {
     let mut group = c.benchmark_group("throughput");
     group.throughput(Throughput::Bytes(CHUNK as u64));
 
     group.bench_function("sha1", |b| {
-        b.iter(|| {
-            let mut hasher = sha1::Sha1::new();
-            hasher.update(black_box(&data[..]));
-            black_box(hasher.finalize())
-        });
+        b.iter_batched_ref(
+            fresh(),
+            |data| {
+                let mut hasher = sha1::Sha1::new();
+                hasher.update(black_box(&data[..]));
+                black_box(hasher.finalize())
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     group.bench_function("sha1dc", |b| {
-        b.iter(|| {
-            let mut hasher = sha1dc::Hasher::new();
-            hasher.update(black_box(&data[..]));
-            black_box(hasher.finalize().expect("no collision"))
-        });
+        b.iter_batched_ref(
+            fresh(),
+            |data| {
+                let mut hasher = sha1dc::Hasher::new();
+                hasher.update(black_box(&data[..]));
+                black_box(hasher.finalize().expect("no collision"))
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     group.bench_function("sha1-checked", |b| {
-        b.iter(|| {
-            let mut hasher = sha1_checked::Sha1::new();
-            hasher.update(black_box(&data[..]));
-            black_box(hasher.try_finalize())
-        });
+        b.iter_batched_ref(
+            fresh(),
+            |data| {
+                let mut hasher = sha1_checked::Sha1::new();
+                hasher.update(black_box(&data[..]));
+                black_box(hasher.try_finalize())
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     group.bench_function("sha1dc/scalar", |b| {
-        b.iter(|| {
-            let mut hasher = sha1dc::Hasher::builder().internal_scalar_backend().build();
-            hasher.update(black_box(&data[..]));
-            black_box(hasher.finalize().expect("no collision"))
-        });
+        b.iter_batched_ref(
+            fresh(),
+            |data| {
+                let mut hasher = sha1dc::Hasher::builder().internal_scalar_backend().build();
+                hasher.update(black_box(&data[..]));
+                black_box(hasher.finalize().expect("no collision"))
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     group.bench_function("sha1dc/no-ubc", |b| {
-        b.iter(|| {
-            let mut hasher = sha1dc::Hasher::builder().internal_use_ubc(false).build();
-            hasher.update(black_box(&data[..]));
-            black_box(hasher.finalize().expect("no collision"))
-        });
+        b.iter_batched_ref(
+            fresh(),
+            |data| {
+                let mut hasher = sha1dc::Hasher::builder().internal_use_ubc(false).build();
+                hasher.update(black_box(&data[..]));
+                black_box(hasher.finalize().expect("no collision"))
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     group.bench_function("sha1-checked/no-ubc", |b| {
-        b.iter(|| {
-            let mut hasher = sha1_checked::Sha1::builder().use_ubc(false).build();
-            hasher.update(black_box(&data[..]));
-            black_box(hasher.try_finalize())
-        });
+        b.iter_batched_ref(
+            fresh(),
+            |data| {
+                let mut hasher = sha1_checked::Sha1::builder().use_ubc(false).build();
+                hasher.update(black_box(&data[..]));
+                black_box(hasher.try_finalize())
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     group.finish();
-}
-
-fn pseudorandom(len: usize) -> Vec<u8> {
-    let mut seed = 0x0123_4567_89ab_cdefu64;
-    (0..len)
-        .map(|_| {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            (seed >> 24) as u8
-        })
-        .collect()
 }
 
 criterion_group!(benches, throughput);

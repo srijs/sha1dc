@@ -6,6 +6,7 @@ publish = false
 
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+rand = { version = "0.10", default-features = false }
 sha1 = "0.11"
 sha1-checked = "0.11.0-rc.0"
 sha1dc = { path = ".." }
