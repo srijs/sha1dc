@@ -62,7 +62,7 @@ fn prefix(w: &Schedule) -> u32 {
             DV_I_46_2_BIT | DV_I_49_2_BIT,
             DV_I_47_2_BIT | DV_I_50_2_BIT | DV_II_46_2_BIT,
             DV_I_48_2_BIT | DV_I_51_2_BIT,
-            0,
+            DV_I_49_2_BIT,
         ]);
         acc0 = vorrq_u32(acc0, vqsubq_u32(bits, set));
     }
@@ -77,15 +77,15 @@ fn prefix(w: &Schedule) -> u32 {
     }
 
     {
-        let near = load::<38>(w);
-        let far = load::<39>(w);
-        let x = veorq_u32(near, vshrq_n_u32(far, 5));
-        let set = vtstq_u32(x, vdupq_n_u32(1 << 1));
+        let near = load::<36>(w);
+        let far = load::<38>(w);
+        let x = veorq_u32(near, far);
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 4));
         let bits = splat([
-            DV_I_49_2_BIT,
-            DV_I_46_2_BIT | DV_I_50_2_BIT | DV_II_49_2_BIT,
-            DV_I_47_2_BIT | DV_I_51_2_BIT | DV_II_50_2_BIT,
-            DV_I_48_2_BIT | DV_II_46_2_BIT | DV_II_51_2_BIT,
+            DV_II_52_0_BIT | DV_II_54_0_BIT,
+            DV_I_43_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT,
+            DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
+            DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT,
         ]);
         acc0 = vorrq_u32(acc0, vqsubq_u32(bits, set));
     }
@@ -105,36 +105,31 @@ fn prefix(w: &Schedule) -> u32 {
     }
 
     {
-        let near = load::<39>(w);
+        let near = load::<37>(w);
         let far = load::<40>(w);
         let x = veorq_u32(near, vshrq_n_u32(far, 25));
         let set = vtstq_u32(x, vdupq_n_u32(1 << 4));
         let bits = splat([
-            DV_I_43_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT,
-            DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
-            DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT,
-            DV_I_44_0_BIT | DV_I_46_0_BIT | DV_II_56_0_BIT,
+            DV_I_43_0_BIT | DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT,
+            DV_I_44_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
+            DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_49_0_BIT | DV_II_48_0_BIT | DV_II_55_0_BIT,
+            0,
         ]);
-        acc0 = vorrq_u32(acc0, vqsubq_u32(bits, set));
+        acc0 = vorrq_u32(acc0, vminq_u32(set, bits));
     }
 
     {
-        let near = load::<38>(w);
-        let far = load::<41>(w);
-        let x = veorq_u32(near, vshrq_n_u32(far, 25));
-        let set = vtstq_u32(x, vdupq_n_u32(1 << 4));
+        let near = load::<39>(w);
+        let far = load::<40>(w);
+        let x = veorq_u32(near, vshrq_n_u32(far, 5));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 1));
         let bits = splat([
-            DV_I_44_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT,
-            DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_49_0_BIT | DV_II_48_0_BIT | DV_II_55_0_BIT,
-            DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT,
-            DV_I_43_0_BIT
-                | DV_I_45_0_BIT
-                | DV_I_47_0_BIT
-                | DV_I_51_0_BIT
-                | DV_II_45_0_BIT
-                | DV_II_50_0_BIT,
+            DV_I_46_2_BIT | DV_I_50_2_BIT | DV_II_49_2_BIT,
+            DV_I_47_2_BIT | DV_I_51_2_BIT | DV_II_50_2_BIT,
+            DV_I_48_2_BIT | DV_II_46_2_BIT | DV_II_51_2_BIT,
+            DV_I_49_2_BIT,
         ]);
-        acc1 = vorrq_u32(acc1, vminq_u32(set, bits));
+        acc1 = vorrq_u32(acc1, vqsubq_u32(bits, set));
     }
 
     {
@@ -192,6 +187,20 @@ fn prefix(w: &Schedule) -> u32 {
 
     {
         let near = load::<42>(w);
+        let far = load::<43>(w);
+        let x = veorq_u32(near, vshrq_n_u32(far, 25));
+        let set = vtstq_u32(x, vdupq_n_u32(1 << 4));
+        let bits = splat([
+            DV_I_44_0_BIT | DV_I_46_0_BIT | DV_II_56_0_BIT,
+            DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_47_0_BIT,
+            DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_48_0_BIT,
+            DV_I_45_0_BIT | DV_I_47_0_BIT | DV_I_49_0_BIT,
+        ]);
+        acc0 = vorrq_u32(acc0, vqsubq_u32(bits, set));
+    }
+
+    {
+        let near = load::<42>(w);
         let far = load::<44>(w);
         let x = veorq_u32(near, far);
         let set = vtstq_u32(x, vdupq_n_u32(1 << 6));
@@ -201,21 +210,7 @@ fn prefix(w: &Schedule) -> u32 {
             DV_I_46_2_BIT | DV_I_48_2_BIT | DV_I_50_2_BIT,
             DV_I_47_2_BIT | DV_I_49_2_BIT | DV_I_51_2_BIT,
         ]);
-        acc0 = vorrq_u32(acc0, vminq_u32(set, bits));
-    }
-
-    {
-        let near = load::<43>(w);
-        let far = load::<44>(w);
-        let x = veorq_u32(near, vshrq_n_u32(far, 25));
-        let set = vtstq_u32(x, vdupq_n_u32(1 << 4));
-        let bits = splat([
-            DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_47_0_BIT,
-            DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_48_0_BIT,
-            DV_I_45_0_BIT | DV_I_47_0_BIT | DV_I_49_0_BIT,
-            DV_I_46_0_BIT | DV_I_48_0_BIT | DV_I_50_0_BIT,
-        ]);
-        acc1 = vorrq_u32(acc1, vqsubq_u32(bits, set));
+        acc1 = vorrq_u32(acc1, vminq_u32(set, bits));
     }
 
     {
@@ -416,11 +411,10 @@ fn prefix(w: &Schedule) -> u32 {
 /// survives only where their XOR is `c`. A check that serves several DVs
 /// appears under each of them, which costs a little table and saves asking
 /// about DVs that are already dead.
-static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 145] = [
+static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 140] = [
     (58, 0, 59, 5, 1),
     (58, 0, 63, 30, 1),
     (61, 1, 62, 6, 1),
-    (37, 4, 40, 29, 0),
     (43, 4, 47, 29, 0),
     (59, 0, 60, 5, 1),
     (59, 0, 64, 30, 1),
@@ -429,14 +423,15 @@ static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 145] = [
     (60, 0, 61, 5, 1),
     (63, 1, 64, 6, 1),
     (35, 4, 39, 29, 0),
+    (44, 4, 46, 4, 1),
     (61, 0, 62, 5, 1),
     (36, 4, 40, 29, 0),
     (39, 1, 42, 6, 1),
     (45, 4, 47, 4, 1),
     (62, 0, 63, 5, 1),
-    (37, 4, 40, 29, 0),
     (37, 4, 41, 29, 0),
     (40, 1, 43, 6, 1),
+    (44, 4, 46, 4, 1),
     (46, 4, 48, 4, 1),
     (63, 0, 64, 5, 1),
     (35, 4, 39, 29, 0),
@@ -445,9 +440,9 @@ static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 145] = [
     (47, 4, 49, 4, 1),
     (36, 4, 40, 29, 0),
     (39, 4, 43, 29, 0),
-    (42, 1, 43, 6, 1),
     (42, 1, 50, 1, 1),
     (36, 4, 37, 4, 1),
+    (44, 4, 46, 4, 1),
     (46, 4, 48, 4, 1),
     (48, 4, 50, 4, 1),
     (37, 4, 41, 29, 0),
@@ -478,7 +473,6 @@ static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 145] = [
     (41, 4, 45, 29, 0),
     (48, 4, 50, 4, 1),
     (61, 0, 62, 5, 1),
-    (37, 4, 40, 29, 0),
     (37, 4, 41, 29, 0),
     (42, 4, 46, 29, 0),
     (48, 6, 51, 1, 0),
@@ -529,7 +523,6 @@ static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 145] = [
     (38, 0, 43, 30, 1),
     (52, 1, 55, 6, 1),
     (52, 1, 56, 1, 1),
-    (36, 4, 38, 4, 1),
     (39, 30, 40, 3, 1),
     (39, 30, 44, 28, 1),
     (54, 4, 56, 4, 1),
@@ -541,19 +534,16 @@ static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 145] = [
     (56, 4, 59, 29, 0),
     (55, 4, 57, 4, 1),
     (55, 4, 61, 29, 1),
-    (37, 4, 40, 29, 0),
     (41, 3, 45, 28, 0),
     (41, 4, 45, 29, 0),
     (44, 4, 48, 29, 0),
     (55, 4, 58, 29, 0),
     (55, 4, 57, 29, 0),
-    (36, 4, 38, 4, 1),
     (42, 3, 46, 28, 0),
     (42, 4, 46, 29, 0),
     (56, 4, 59, 29, 0),
     (56, 4, 58, 29, 0),
     (58, 4, 62, 29, 0),
-    (37, 4, 40, 29, 0),
     (43, 3, 47, 28, 0),
     (43, 4, 47, 29, 0),
     (57, 4, 59, 29, 0),
@@ -566,38 +556,38 @@ static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 145] = [
 
 /// Where each DV's checks begin in [`TAIL_CHECKS`], and how many it has.
 static TAIL_SPANS: [(u16, u8); 32] = [
-    (0, 5),
-    (5, 4),
-    (9, 3),
-    (12, 2),
+    (0, 4),
+    (4, 4),
+    (8, 3),
+    (11, 3),
     (14, 1),
-    (15, 4),
-    (19, 1),
-    (20, 4),
+    (15, 3),
+    (18, 1),
+    (19, 5),
     (24, 0),
     (24, 4),
-    (28, 2),
-    (30, 5),
+    (28, 1),
+    (29, 6),
     (35, 2),
     (37, 7),
     (44, 3),
     (47, 7),
     (54, 5),
-    (59, 5),
-    (64, 1),
-    (65, 6),
-    (71, 9),
-    (80, 7),
-    (87, 3),
-    (90, 8),
-    (98, 3),
-    (101, 8),
-    (109, 3),
-    (112, 10),
-    (122, 8),
-    (130, 6),
-    (136, 5),
-    (141, 4),
+    (59, 4),
+    (63, 1),
+    (64, 6),
+    (70, 9),
+    (79, 7),
+    (86, 3),
+    (89, 8),
+    (97, 3),
+    (100, 8),
+    (108, 3),
+    (111, 9),
+    (120, 7),
+    (127, 5),
+    (132, 4),
+    (136, 4),
 ];
 
 /// The checks the prefix leaves. `mask` is never zero here.

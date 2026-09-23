@@ -81,6 +81,21 @@ fn prefix(w: &Schedule) -> u32 {
     }
 
     {
+        let near = load::<36>(w);
+        let far = load::<38>(w);
+        let x = _mm_xor_si128(near, far);
+        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
+        let miss = _mm_cmpeq_epi32(tested, zero);
+        let bits = _mm_set_epi32(
+            (DV_II_52_0_BIT | DV_II_54_0_BIT) as i32,
+            (DV_I_43_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT) as i32,
+            (DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT) as i32,
+            (DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT) as i32,
+        );
+        acc0 = _mm_or_si128(acc0, _mm_and_si128(miss, bits));
+    }
+
+    {
         let near = load::<38>(w);
         let far = load::<39>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 5));
@@ -92,7 +107,7 @@ fn prefix(w: &Schedule) -> u32 {
             (DV_I_47_2_BIT | DV_I_51_2_BIT | DV_II_50_2_BIT) as i32,
             (DV_I_48_2_BIT | DV_II_46_2_BIT | DV_II_51_2_BIT) as i32,
         );
-        acc0 = _mm_or_si128(acc0, _mm_and_si128(miss, bits));
+        acc1 = _mm_or_si128(acc1, _mm_and_si128(miss, bits));
     }
 
     {
@@ -107,7 +122,7 @@ fn prefix(w: &Schedule) -> u32 {
             (DV_I_51_2_BIT | DV_II_50_2_BIT) as i32,
             (DV_II_46_2_BIT | DV_II_51_2_BIT) as i32,
         );
-        acc1 = _mm_or_si128(acc1, _mm_andnot_si128(miss, bits));
+        acc0 = _mm_or_si128(acc0, _mm_andnot_si128(miss, bits));
     }
 
     {
@@ -122,7 +137,7 @@ fn prefix(w: &Schedule) -> u32 {
             (DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT) as i32,
             (DV_I_44_0_BIT | DV_I_46_0_BIT | DV_II_56_0_BIT) as i32,
         );
-        acc0 = _mm_or_si128(acc0, _mm_and_si128(miss, bits));
+        acc1 = _mm_or_si128(acc1, _mm_and_si128(miss, bits));
     }
 
     {
@@ -136,29 +151,6 @@ fn prefix(w: &Schedule) -> u32 {
             (DV_I_47_0_BIT | DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT) as i32,
             (DV_I_48_0_BIT | DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT) as i32,
             (DV_I_49_0_BIT | DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_51_0_BIT) as i32,
-        );
-        acc1 = _mm_or_si128(acc1, _mm_andnot_si128(miss, bits));
-    }
-
-    {
-        let near = load::<38>(w);
-        let far = load::<41>(w);
-        let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
-        let miss = _mm_cmpeq_epi32(tested, zero);
-        let bits = _mm_set_epi32(
-            (DV_I_44_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT)
-                as i32,
-            (DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_49_0_BIT | DV_II_48_0_BIT | DV_II_55_0_BIT)
-                as i32,
-            (DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT)
-                as i32,
-            (DV_I_43_0_BIT
-                | DV_I_45_0_BIT
-                | DV_I_47_0_BIT
-                | DV_I_51_0_BIT
-                | DV_II_45_0_BIT
-                | DV_II_50_0_BIT) as i32,
         );
         acc0 = _mm_or_si128(acc0, _mm_andnot_si128(miss, bits));
     }
@@ -546,8 +538,7 @@ fn prefix(w: &Schedule) -> u32 {
 /// survives only where their XOR is `c`. A check that serves several DVs
 /// appears under each of them, which costs a little table and saves asking
 /// about DVs that are already dead.
-static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 106] = [
-    (37, 4, 39, 4, 1),
+static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 101] = [
     (58, 0, 59, 5, 1),
     (58, 0, 63, 30, 1),
     (61, 1, 62, 6, 1),
@@ -624,7 +615,6 @@ static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 106] = [
     (56, 29, 59, 29, 1),
     (42, 4, 46, 29, 0),
     (38, 0, 43, 30, 1),
-    (36, 4, 38, 4, 1),
     (39, 30, 40, 3, 1),
     (39, 30, 44, 28, 1),
     (54, 4, 56, 4, 1),
@@ -632,19 +622,16 @@ static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 106] = [
     (56, 29, 59, 29, 1),
     (40, 4, 44, 29, 0),
     (43, 4, 47, 29, 0),
-    (37, 4, 39, 4, 1),
     (55, 4, 57, 4, 1),
     (55, 4, 61, 29, 1),
     (41, 3, 45, 28, 0),
     (41, 4, 45, 29, 0),
     (44, 4, 48, 29, 0),
     (55, 4, 57, 29, 0),
-    (36, 4, 38, 4, 1),
     (42, 3, 46, 28, 0),
     (42, 4, 46, 29, 0),
     (56, 4, 58, 29, 0),
     (58, 4, 62, 29, 0),
-    (37, 4, 39, 4, 1),
     (43, 3, 47, 28, 0),
     (43, 4, 47, 29, 0),
     (57, 4, 59, 29, 0),
@@ -657,38 +644,38 @@ static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 106] = [
 
 /// Where each DV's checks begin in [`TAIL_CHECKS`], and how many it has.
 static TAIL_SPANS: [(u16, u8); 32] = [
-    (0, 5),
-    (5, 4),
-    (9, 3),
-    (12, 1),
-    (13, 0),
-    (13, 2),
-    (15, 0),
-    (15, 3),
-    (18, 0),
-    (18, 2),
-    (20, 0),
-    (20, 4),
-    (24, 1),
-    (25, 6),
-    (31, 2),
-    (33, 6),
-    (39, 4),
-    (43, 3),
-    (46, 0),
-    (46, 5),
-    (51, 7),
-    (58, 5),
-    (63, 1),
-    (64, 6),
-    (70, 1),
-    (71, 5),
-    (76, 1),
-    (77, 8),
-    (85, 7),
-    (92, 5),
-    (97, 5),
-    (102, 4),
+    (0, 4),
+    (4, 4),
+    (8, 3),
+    (11, 1),
+    (12, 0),
+    (12, 2),
+    (14, 0),
+    (14, 3),
+    (17, 0),
+    (17, 2),
+    (19, 0),
+    (19, 4),
+    (23, 1),
+    (24, 6),
+    (30, 2),
+    (32, 6),
+    (38, 4),
+    (42, 3),
+    (45, 0),
+    (45, 5),
+    (50, 7),
+    (57, 5),
+    (62, 1),
+    (63, 6),
+    (69, 1),
+    (70, 5),
+    (75, 1),
+    (76, 7),
+    (83, 6),
+    (89, 4),
+    (93, 4),
+    (97, 4),
 ];
 
 /// The checks the prefix leaves. `mask` is never zero here.

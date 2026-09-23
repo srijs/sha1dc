@@ -27,6 +27,11 @@
 //! times more, and a greedy spending on coverage will leave a DV at rank 0
 //! while it deepens one already at rank 11. That leaves the tail entered on
 //! every block, and the `mask == 0` return after the prefix unreachable.
+//!
+//! A greedy commits to each group as it goes, which can leave a better set
+//! untried. A local search then swaps one or two groups at a time while that
+//! lowers how often the tail runs at all, for about a tenth fewer entries at
+//! the same budget.
 
 use std::collections::HashMap;
 
@@ -278,36 +283,13 @@ pub fn solve(width: usize, groups: usize) -> Plan {
     let bits = Bits::collect();
     let goal = required();
     let cands = candidates(&bits, &spans(&bits));
-
-    // Continuous runs of `i` within one signature: what a vector group can
-    // cover with a single pair of loads.
-    let mut by_signature: HashMap<Signature, Vec<Cond>> = HashMap::new();
-    for c in &cands {
-        by_signature.entry(signature(c)).or_default().push(*c);
-    }
-    // Every run of conditions in one signature is a candidate. A shorter run
-    // can be worth more per group than the whole, and a run may step over an
-    // `i` with no condition: the lane it leaves empty takes no DV bits and
-    // clears nothing. What a hole costs is the lanes it wastes, which
-    // [`groups_for`] prices and the greedy below weighs.
-    let mut runs: Vec<Vec<Cond>> = Vec::new();
-    for mut group in by_signature.into_values() {
-        group.sort_by_key(|c| c.i);
-        for from in 0..group.len() {
-            for to in from + 1..=group.len() {
-                runs.push(group[from..to].to_vec());
-            }
-        }
-    }
-
-    // A HashMap decided the order above, and the greedy below keeps the
-    // first of equal candidates, so sort to make the output reproducible.
-    runs.sort_by_key(|r| (signature(&r[0]), r[0].i, r.len()));
+    let all = runs_of(&cands);
+    let mut runs = all.clone();
 
     let mut live: [Forest; 32] = std::array::from_fn(|_| Forest::new(bits.vertex.len()));
     let mut ranks = [0u32; 32];
     let mut covered = 0;
-    let mut families: Vec<Family> = Vec::new();
+    let mut picked: Vec<Vec<Cond>> = Vec::new();
     let mut spent = 0;
 
     while spent < groups && covered < goal {
@@ -349,18 +331,36 @@ pub fn solve(width: usize, groups: usize) -> Plan {
         }
         covered += gain.iter().sum::<u32>();
         spent += cost;
-        let s = signature(&run[0]);
-        families.push(Family {
-            offset: s.0,
-            near_bit: s.1,
-            far_bit: s.2,
-            // `c` is the value the condition requires, so the other
-            // value is the one that clears.
-            clears_on: s.3 ^ 1,
-            members: run.iter().map(|c| (c.i, c.dvs)).collect(),
-        });
         runs.retain(|r| r != &run);
+        picked.push(run);
     }
+
+    // The greedy spends each group on what pays most at that moment, which
+    // can leave a better set untried; a local search improves on it. It
+    // minimizes how often the tail runs, which is what a vector prefix is
+    // for; the scalar one enters its tail almost always, and there the
+    // greedy's own measure, the survivors, is the right one.
+    if covered < goal && width > 1 {
+        picked = refine(&bits, &all, picked, width, groups);
+        let chosen: Vec<&Vec<Cond>> = picked.iter().collect();
+        (live, ranks) = reach(&bits, &chosen);
+        covered = ranks.iter().sum();
+    }
+    let families: Vec<Family> = picked
+        .iter()
+        .map(|run| {
+            let s = signature(&run[0]);
+            Family {
+                offset: s.0,
+                near_bit: s.1,
+                far_bit: s.2,
+                // `c` is the value the condition requires, so the other
+                // value is the one that clears.
+                clears_on: s.3 ^ 1,
+                members: run.iter().map(|c| (c.i, c.dvs)).collect(),
+            }
+        })
+        .collect();
 
     // The rest one at a time, where the measure is conditions rather than
     // groups, so this half wants the fewest of them.
@@ -395,4 +395,163 @@ pub fn solve(width: usize, groups: usize) -> Plan {
         tail,
         prefix_ranks: ranks,
     }
+}
+
+/// How often the tail runs on random data for a prefix reaching `ranks`.
+fn p_tail(ranks: &[u32; 32]) -> f64 {
+    1.0 - ranks
+        .iter()
+        .map(|&r| 1.0 - 0.5f64.powi(r as i32))
+        .product::<f64>()
+}
+
+/// Continuous runs of `i` within one signature: what a vector group can
+/// cover with a single pair of loads.
+///
+/// Every run of conditions in one signature is a candidate. A shorter run
+/// can be worth more per group than the whole, and a run may step over an
+/// `i` with no condition: the lane it leaves empty takes no DV bits and
+/// clears nothing. What a hole costs is the lanes it wastes, which
+/// [`groups_for`] prices and the solver weighs.
+fn runs_of(cands: &[Cond]) -> Vec<Vec<Cond>> {
+    let mut by_signature: HashMap<Signature, Vec<Cond>> = HashMap::new();
+    for c in cands {
+        by_signature.entry(signature(c)).or_default().push(*c);
+    }
+    let mut runs: Vec<Vec<Cond>> = Vec::new();
+    for mut group in by_signature.into_values() {
+        group.sort_by_key(|c| c.i);
+        for from in 0..group.len() {
+            for to in from + 1..=group.len() {
+                runs.push(group[from..to].to_vec());
+            }
+        }
+    }
+    // A HashMap decided the order above, and the solver keeps the first of
+    // equal candidates, so sort to make the output reproducible.
+    runs.sort_by_key(|r| (signature(&r[0]), r[0].i, r.len()));
+    runs
+}
+
+/// The forests and ranks a set of runs reaches.
+fn reach(bits: &Bits, chosen: &[&Vec<Cond>]) -> ([Forest; 32], [u32; 32]) {
+    let mut forests: [Forest; 32] = std::array::from_fn(|_| Forest::new(bits.vertex.len()));
+    let mut ranks = [0; 32];
+    for run in chosen {
+        for c in run.iter() {
+            let (x, y) = (bits.index[&(c.i, c.a)], bits.index[&(c.j, c.b)]);
+            for (dv, f) in forests.iter_mut().enumerate() {
+                if c.dvs >> dv & 1 == 1 && f.union(x, y, c.c) {
+                    ranks[dv] += 1;
+                }
+            }
+        }
+    }
+    (forests, ranks)
+}
+
+/// The best run to add to `chosen` within `free` groups, if it beats `best`.
+fn best_addition(
+    bits: &Bits,
+    runs: &[Vec<Cond>],
+    chosen: &[usize],
+    free: usize,
+    width: usize,
+    best: f64,
+) -> Option<(f64, usize)> {
+    let (forests, ranks) = reach(bits, &chosen.iter().map(|&k| &runs[k]).collect::<Vec<_>>());
+    let mut pick: Option<(f64, usize)> = None;
+    for (k, run) in runs.iter().enumerate() {
+        if groups_for(run, width) > free || chosen.contains(&k) {
+            continue;
+        }
+        let gain = apply(&mut HashMap::new(), &forests, bits, run);
+        let mut r = ranks;
+        for dv in 0..32 {
+            r[dv] += gain[dv];
+        }
+        let p = p_tail(&r);
+        if p < best - 1e-12 && pick.is_none_or(|(q, _)| p < q) {
+            pick = Some((p, k));
+        }
+    }
+    pick
+}
+
+/// Improves a prefix by local search: swap one run, or two, for the runs that
+/// lower P(tail) most within the same budget, until no swap helps.
+fn refine(
+    bits: &Bits,
+    runs: &[Vec<Cond>],
+    picked: Vec<Vec<Cond>>,
+    width: usize,
+    groups: usize,
+) -> Vec<Vec<Cond>> {
+    let mut chosen: Vec<usize> = picked
+        .iter()
+        .map(|p| {
+            runs.iter()
+                .position(|r| r == p)
+                .expect("a greedy run not among the candidates")
+        })
+        .collect();
+    let cost = |ix: &[usize]| {
+        ix.iter()
+            .map(|&k| groups_for(&runs[k], width))
+            .sum::<usize>()
+    };
+    let p_of =
+        |ix: &[usize]| p_tail(&reach(bits, &ix.iter().map(|&k| &runs[k]).collect::<Vec<_>>()).1);
+    let mut best = p_of(&chosen);
+    loop {
+        let mut improved = false;
+        for slot in 0..chosen.len() {
+            let mut rest = chosen.clone();
+            rest.remove(slot);
+            let free = groups - cost(&rest);
+            if let Some((p, k)) = best_addition(bits, runs, &rest, free, width, best) {
+                chosen[slot] = k;
+                best = p;
+                improved = true;
+            }
+        }
+        let free = groups - cost(&chosen);
+        if free > 0
+            && let Some((p, k)) = best_addition(bits, runs, &chosen, free, width, best)
+        {
+            chosen.push(k);
+            best = p;
+            improved = true;
+        }
+        // Two out, the best two back in, one at a time.
+        if !improved {
+            'pairs: for i in 0..chosen.len() {
+                for j in i + 1..chosen.len() {
+                    let mut rest: Vec<usize> = chosen
+                        .iter()
+                        .enumerate()
+                        .filter(|&(n, _)| n != i && n != j)
+                        .map(|(_, &k)| k)
+                        .collect();
+                    for _ in 0..2 {
+                        let free = groups - cost(&rest);
+                        if let Some((_, k)) = best_addition(bits, runs, &rest, free, width, 1.0) {
+                            rest.push(k);
+                        }
+                    }
+                    let p = p_of(&rest);
+                    if p < best - 1e-12 {
+                        chosen = rest;
+                        best = p;
+                        improved = true;
+                        break 'pairs;
+                    }
+                }
+            }
+        }
+        if !improved {
+            break;
+        }
+    }
+    chosen.into_iter().map(|k| runs[k].clone()).collect()
 }
