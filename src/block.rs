@@ -13,7 +13,7 @@
 //!
 //! [paper]: https://marc-stevens.nl/research/papers/C13-S.pdf
 
-use crate::{BLOCK_SIZE, Inner, ubc_check::RecompressFrom};
+use crate::{BLOCK_SIZE, Inner, Schedule, ubc_check::RecompressFrom};
 
 mod backend;
 mod rounds;
@@ -21,11 +21,24 @@ mod rounds;
 pub(crate) use backend::Backend;
 use rounds::{compression_w, recompression_step};
 
+/// The schedule and recompression states of the block being compressed. On
+/// the stack rather than the hasher, which keeps `Hasher::new` and moves cheap.
+struct Scratch {
+    m1: Schedule,
+    state_58: [u32; 5],
+    state_65: [u32; 5],
+}
+
 /// Compresses `blocks` into the hasher's chaining value, testing each one for
 /// a collision attack.
 #[inline]
 pub(crate) fn compress(ctx: &mut Inner, blocks: &[[u8; BLOCK_SIZE]]) {
     let backend = ctx.backend;
+    let mut s = Scratch {
+        m1: Schedule::zeroed(),
+        state_58: [0; 5],
+        state_65: [0; 5],
+    };
 
     for block in blocks {
         // The input chaining value. Only a flagged block goes on to use it,
@@ -33,33 +46,40 @@ pub(crate) fn compress(ctx: &mut Inner, blocks: &[[u8; BLOCK_SIZE]]) {
         // than to the hasher.
         let ihv1 = ctx.h;
 
-        let Inner {
-            h,
-            m1,
-            state_58,
-            state_65,
-            ..
-        } = ctx;
-        backend.compress_spill(h, block, m1, state_58, state_65);
+        backend.compress_spill(
+            &mut ctx.h,
+            block,
+            &mut s.m1,
+            &mut s.state_58,
+            &mut s.state_65,
+        );
 
         // Without the filter every attack is a candidate, which is what the
         // `no ubc check` benchmark measures.
         let candidates = if ctx.ubc_check {
-            crate::ubc_check::ubc_check(&ctx.m1, ctx.scalar_only)
+            crate::ubc_check::ubc_check(&s.m1, ctx.scalar_only)
         } else {
             !0
         };
 
-        if candidates != 0 && attacked(backend, ihv1, ctx.h, ctx, candidates) {
+        if candidates != 0
+            && attacked(
+                backend,
+                ihv1,
+                ctx.h,
+                &mut s,
+                ctx.reduced_round_collision,
+                candidates,
+            )
+        {
             ctx.found_collision = true;
 
             // Mitigation. Two more compressions of this block give a digest
             // that the other message of the pair does not share, at the cost
             // of one that no other SHA-1 implementation agrees with.
             if ctx.safe_hash {
-                let Inner { h, m1, .. } = ctx;
-                compression_w(h, m1);
-                compression_w(h, m1);
+                compression_w(&mut ctx.h, &s.m1);
+                compression_w(&mut ctx.h, &s.m1);
             }
         }
     }
@@ -89,25 +109,20 @@ fn attacked(
     backend: Backend,
     ihv1: [u32; 5],
     chaining_out: [u32; 5],
-    ctx: &mut Inner,
+    s: &mut Scratch,
+    reduced_round_collision: bool,
     candidates: u32,
 ) -> bool {
     // The hardware backends give the schedule but not the states that
     // recompression starts from, so they are recovered here, once, and only
     // for a block that has a candidate at all.
-    let Inner {
-        m1,
-        state_58,
-        state_65,
-        ..
-    } = ctx;
     backend.ensure_states(
         &ihv1,
         &chaining_out,
-        m1,
+        &s.m1,
         candidates & crate::ubc_check::STEP58_MASK != 0,
-        state_58,
-        state_65,
+        &mut s.state_58,
+        &mut s.state_65,
     );
 
     // Walking the set bits visits only the candidates. Reading `mask_bit`
@@ -123,15 +138,15 @@ fn attacked(
         debug_assert_eq!(dv.mask_bit, bit as i32, "DV table is out of order");
 
         let from = match dv.recompress_from {
-            RecompressFrom::Step58 => &ctx.state_58,
-            RecompressFrom::Step65 => &ctx.state_65,
+            RecompressFrom::Step58 => &s.state_58,
+            RecompressFrom::Step65 => &s.state_65,
         };
 
         // The reduced-step option asks a second question — whether the pair
         // already collided on the way *in* — which needs the chaining value
         // the partner started from whether or not this is an attack, and only
         // the way back hands that over.
-        if ctx.reduced_round_collision {
+        if reduced_round_collision {
             // The chaining value the partner starts from. It belongs to this
             // call and not to the hasher, which never reads it again.
             let mut ihv2 = [0u32; 5];
@@ -140,14 +155,14 @@ fn attacked(
                 dv.recompress_from,
                 &mut ihv2,
                 &mut ends_on,
-                &ctx.m1,
+                &s.m1,
                 &dv.dm,
                 from,
             );
             if xor(&ends_on, &chaining_out) == 0 || xor(&ihv1, &ihv2) == 0 {
                 return true;
             }
-        } else if backend.is_attack(dv.recompress_from, &ctx.m1, &dv.dm, from, &chaining_out) {
+        } else if backend.is_attack(dv.recompress_from, &s.m1, &dv.dm, from, &chaining_out) {
             return true;
         }
     }

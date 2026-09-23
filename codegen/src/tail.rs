@@ -14,7 +14,9 @@ fn by_dv(plan: &Plan) -> Vec<Vec<&Cond>> {
     (0..32)
         .map(|d| {
             let mut v: Vec<&Cond> = plan.tail.iter().filter(|c| c.dvs >> d & 1 == 1).collect();
-            v.sort_by_key(|c| (c.i, c.a));
+            // Checks wanting a 1 first: they fail at once on the mostly-zero
+            // last block of a message; for random blocks order doesn't matter.
+            v.sort_by_key(|c| (std::cmp::Reverse(c.c), c.i, c.a));
             v
         })
         .collect()
