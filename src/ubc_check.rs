@@ -52,10 +52,12 @@
 //! [sha1collisiondetection](https://github.com/cr-marcstevens/sha1collisiondetection),
 //! the implementation that accompanies the paper. It is licensed under MIT.
 //!
-//! Two tests compare this module against that original. `matches_c_reference`
-//! runs 100,000 message schedules and compares the flagged count and a
-//! checksum of the mask stream against values taken from the C.
-//! `dv_table_matches_c` checksums the derived DV table.
+//! The tests compare this module against that original. `codegen/` has it as
+//! a git submodule, pinned to a commit, runs its `lib/ubc_check.c` to read
+//! its rules off, checks them against it, and writes them to `upstream.rs`,
+//! so the tests need no C. Every form must give the rules' mask on a million
+//! random schedules, and next to a block upstream keeps each DV on;
+//! `dv_table_matches_upstream` compares the derived DV table entry for entry.
 
 use crate::Schedule;
 
@@ -190,7 +192,7 @@ const fn message_difference(family: DvType, k: u32, b: u32) -> [u32; 80] {
 ///
 /// The C original writes out all 80 words of every difference. That is 500
 /// lines of hex that a reader cannot verify. The two seeds above give the same
-/// values, and `dv_table_matches_c` compares the result against them.
+/// values, and `dv_table_matches_upstream` compares the result against them.
 const DVS: [(DvType, u32, u32, RecompressFrom); 32] = [
     (DvType::I, 43, 0, RecompressFrom::Step58),
     (DvType::I, 44, 0, RecompressFrom::Step58),
@@ -268,8 +270,9 @@ const fn build_dvs() -> [Info; 32] {
     }
     out
 }
-#[cfg(test)]
-mod conditions;
+
+#[cfg(all(test, feature = "std"))]
+mod upstream;
 
 mod scalar;
 
@@ -372,24 +375,14 @@ pub(crate) fn ubc_check(w: &Schedule, scalar_only: bool) -> u32 {
     dispatch!(scalar_only, run)
 }
 
-#[cfg(test)]
+// Every test here needs `std`: for its collections, or for `quickcheck`.
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
-
-    /// Deterministic message schedules. The generator matches the one that
-    /// produced the reference constants from the C implementation.
-    fn schedules(n: usize, mut f: impl FnMut(&Schedule)) {
-        let mut seed = 0x1234_5678_9abc_def0u64;
-        for _ in 0..n {
-            let m = core::array::from_fn(|_| {
-                seed ^= seed << 13;
-                seed ^= seed >> 7;
-                seed ^= seed << 17;
-                seed as u32
-            });
-            f(&Schedule::expand(&m));
-        }
-    }
+    use quickcheck::{Arbitrary, Gen, QuickCheck, TestResult};
+    use std::collections::BTreeMap;
+    use std::string::String;
+    use std::vec::Vec;
 
     /// Names the form that disagrees with [`scalar::check`] on `w`, if one
     /// does. Only the forms that this build has are run.
@@ -460,73 +453,234 @@ mod tests {
         );
     }
 
-    /// Compares the derived DV table against the values in the C original.
-    ///
-    /// The checksum covers the written-out table that this crate had before
-    /// `expand` replaced it. That table was a copy of the one in
-    /// `ubc_check.c`. A wrong seed or recurrence stops the detection from
-    /// matching upstream, and this test detects that.
-    #[test]
-    fn dv_table_matches_c() {
-        const EXPECTED: u64 = 0xab2c_9b22_b0b0_b952;
+    /// Bit `k` of a schedule: bit `k % 32` of step `k / 32`.
+    fn bit(w: &Schedule, k: usize) -> u32 {
+        w[k / 32] >> (k % 32) & 1
+    }
 
-        let mut checksum = 0xcbf2_9ce4_8422_2325u64;
-        let mut feed = |v: u32| {
-            for byte in v.to_le_bytes() {
-                checksum ^= u64::from(byte);
-                checksum = checksum.wrapping_mul(0x100_0000_01b3);
+    fn flip(w: &Schedule, bits: &[usize]) -> Schedule {
+        let mut v = w.clone();
+        for &k in bits {
+            v[k / 32] ^= 1 << (k % 32);
+        }
+        v
+    }
+
+    /// Upstream's mask: a DV survives exactly where all its rules hold.
+    ///
+    /// `upstream.rs` holds the rules, which `codegen/` read off upstream's C
+    /// and checked against it before writing them. Upstream tested its own
+    /// generated check the same way: against a plain per-DV list of
+    /// conditions, over many random schedules.
+    fn upstream_mask(w: &Schedule) -> u32 {
+        upstream::RULES.iter().fold(!0, |mask, &(dv, u, v, c)| {
+            if bit(w, u.into()) ^ bit(w, v.into()) == u32::from(c) {
+                mask
+            } else {
+                mask & !(1 << dv)
             }
-        };
-        for dv in &SHA1_DVS {
-            feed(dv.recompress_from as u32);
-            feed(dv.mask_bit as u32);
-            for word in dv.dm {
-                feed(word);
+        })
+    }
+
+    /// What gives a different mask from upstream on `w`, if anything: a form
+    /// this build has, or [`ubc_check`] either way `scalar_only` can be set.
+    fn diverges_from_upstream(w: &Schedule) -> Option<String> {
+        let want = upstream_mask(w);
+        let got = scalar::check(w);
+        if got != want {
+            return Some(std::format!(
+                "scalar gives {got:#010x}, upstream {want:#010x}"
+            ));
+        }
+        if let Some(form) = diverging_form(w) {
+            return Some(std::format!(
+                "{form} differs from upstream, which gives {want:#010x}"
+            ));
+        }
+        for (scalar_only, path) in [
+            (false, "the dispatched form"),
+            (true, "the scalar-only path"),
+        ] {
+            let got = ubc_check(w, scalar_only);
+            if got != want {
+                return Some(std::format!(
+                    "{path} gives {got:#010x}, upstream {want:#010x}"
+                ));
             }
         }
-        assert_eq!(checksum, EXPECTED, "DV table diverged from the C original");
+        None
     }
 
-    /// Compares `ubc_check` against the C original. Both numbers come from a
-    /// run of upstream `lib/ubc_check.c` over this same schedule stream. The
-    /// count is the more sensitive of the two. If a check clears too few bits,
-    /// the number of flagged blocks increases immediately.
+    fn assert_matches_upstream(w: &Schedule) {
+        if let Some(what) = diverges_from_upstream(w) {
+            panic!("{what}");
+        }
+    }
+
+    /// The tied groups of `dv`: its rules that share their first bit tie
+    /// their second bits to it.
+    fn groups(dv: usize) -> Vec<Vec<usize>> {
+        let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for &(d, u, v, _) in &upstream::RULES {
+            if usize::from(d) == dv {
+                let u = usize::from(u);
+                groups
+                    .entry(u)
+                    .or_insert_with(|| std::vec![u])
+                    .push(v.into());
+            }
+        }
+        groups.into_values().collect()
+    }
+
+    /// A schedule that upstream keeps `dv` on: arbitrary words, then each bit
+    /// a rule of `dv` ties set from the bit it is tied to.
+    fn kept_block(dv: usize, g: &mut Gen) -> Schedule {
+        let mut w = Schedule::zeroed();
+        for t in 0..crate::SCHEDULE_LEN {
+            w[t] = u32::arbitrary(g);
+        }
+        for &(d, u, v, c) in &upstream::RULES {
+            let v = usize::from(v);
+            if usize::from(d) == dv && bit(&w, u.into()) ^ bit(&w, v) != u32::from(c) {
+                w[v / 32] ^= 1 << (v % 32);
+            }
+        }
+        w
+    }
+
+    /// Every part of `group` on its own: each nonempty proper subset, once
+    /// per pair of complements, since flipping either is the same to every
+    /// rule.
+    fn parts(group: &[usize]) -> Vec<Vec<usize>> {
+        (1..1u32 << (group.len() - 1))
+            .map(|set| {
+                let mut part = std::vec![group[0]];
+                part.extend(
+                    (1..group.len())
+                        .filter(|&k| set >> (k - 1) & 1 == 0)
+                        .map(|k| group[k]),
+                );
+                part
+            })
+            .collect()
+    }
+
+    /// FNV-1a over the little-endian bytes of `dm`, as `codegen/` hashes
+    /// upstream's.
+    fn dm_hash(dm: &[u32; 80]) -> u64 {
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        for byte in dm.iter().flat_map(|w| w.to_le_bytes()) {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100_0000_01b3);
+        }
+        hash
+    }
+
+    /// The derived DV table is upstream's, entry for entry. A wrong seed or
+    /// recurrence in `expand` shows up here as a wrong difference.
     #[test]
-    fn matches_c_reference() {
-        const C_NONZERO: u32 = 4767;
-        const C_CHECKSUM: u64 = 0x8c03_7397_6647_17a3;
-
-        let mut nonzero = 0u32;
-        let mut checksum = 0xcbf2_9ce4_8422_2325u64;
-        schedules(100_000, |w| {
-            let mask = ubc_check(w, false);
-            if mask != 0 {
-                nonzero += 1;
-            }
-            for byte in mask.to_le_bytes() {
-                checksum ^= u64::from(byte);
-                checksum = checksum.wrapping_mul(0x100_0000_01b3);
-            }
-        });
-
-        assert_eq!(nonzero, C_NONZERO, "flagged-block count diverged from C");
-        assert_eq!(checksum, C_CHECKSUM, "mask stream diverged from C");
+    fn dv_table_matches_upstream() {
+        for (bit, (ours, theirs)) in SHA1_DVS.iter().zip(&upstream::DVS).enumerate() {
+            let &(dv_type, dv_k, dv_b, testt, maski, maskb, dm) = theirs;
+            let (family, k, b, _) = DVS[bit];
+            let family = match family {
+                DvType::I => 1,
+                DvType::II => 2,
+            };
+            assert_eq!(
+                (family, k as i32, b as i32),
+                (dv_type, dv_k, dv_b),
+                "type, K and B of DV {bit}"
+            );
+            assert_eq!(ours.mask_bit, maskb, "mask bit of DV {bit}");
+            assert_eq!(maski, 0, "mask word of DV {bit}");
+            assert_eq!(
+                ours.recompress_from as i32, testt,
+                "recompression step of DV {bit}"
+            );
+            assert_eq!(dm_hash(&ours.dm), dm, "message difference of DV {bit}");
+        }
     }
 
-    /// Property tests, which complement the fixed streams above. Those pin
-    /// the behaviour against the C original at an exact set of inputs. These
-    /// look for a disagreement anywhere, and shrink a failure to a small
-    /// case.
+    /// Every form gives upstream's mask on random schedules, drawn the way
+    /// upstream's own test draws them: expanded from random messages, fresh
+    /// on every run. A failure is shrunk to a small message.
     ///
-    /// `quickcheck` needs `std`, so a `no_std` build skips them.
-    #[cfg(feature = "std")]
+    /// `SHA1DC_UPSTREAM_SCHEDULES` runs more, for a long local run;
+    /// upstream's test ran 2^24.
+    #[test]
+    fn every_form_matches_upstream() {
+        fn prop(m: [u32; 16]) -> TestResult {
+            match diverges_from_upstream(&Schedule::expand(&m)) {
+                None => TestResult::passed(),
+                Some(what) => TestResult::error(what),
+            }
+        }
+        let n = std::env::var("SHA1DC_UPSTREAM_SCHEDULES")
+            .map(|n| {
+                n.parse()
+                    .expect("SHA1DC_UPSTREAM_SCHEDULES must be a number")
+            })
+            .unwrap_or(1_000_000);
+        // `max_tests` caps the cases tried, and defaults to far fewer.
+        QuickCheck::new()
+            .tests(n)
+            .max_tests(n)
+            .quickcheck(prop as fn([u32; 16]) -> TestResult);
+    }
+
+    /// Every form gives upstream's mask next to a block that keeps each DV:
+    /// with each bit flipped, with each tied group flipped whole, which keeps
+    /// the DV, and with each part of each group flipped, which rules it out.
+    ///
+    /// A random schedule keeps a given DV between once in 128 and once in
+    /// about 50,000 tries, so the stream above reaches the rarest DVs only a
+    /// few dozen times. These reach every one, and every one of its
+    /// conditions from both sides.
+    #[test]
+    fn every_form_matches_upstream_next_to_every_dv() {
+        let mut g = Gen::new(100);
+        for dv in 0..32 {
+            let base = kept_block(dv, &mut g);
+            let groups = groups(dv);
+            assert!(!groups.is_empty(), "DV {dv} has no rules");
+            assert_ne!(upstream_mask(&base) >> dv & 1, 0, "the block keeps DV {dv}");
+
+            assert_matches_upstream(&base);
+            for k in 0..crate::SCHEDULE_LEN * 32 {
+                assert_matches_upstream(&flip(&base, &[k]));
+            }
+            for group in &groups {
+                let whole = flip(&base, group);
+                assert_ne!(
+                    upstream_mask(&whole) >> dv & 1,
+                    0,
+                    "a whole group of DV {dv}"
+                );
+                assert_matches_upstream(&whole);
+                for part in parts(group) {
+                    let part = flip(&base, &part);
+                    assert_eq!(
+                        upstream_mask(&part) >> dv & 1,
+                        0,
+                        "a part of a group of DV {dv}"
+                    );
+                    assert_matches_upstream(&part);
+                }
+            }
+        }
+    }
+
+    /// A property test on words no message could produce.
     mod properties {
         use super::*;
         use quickcheck::QuickCheck;
 
         /// The forms share no code, so they must agree on any words at all,
         /// not only on a real expansion. An expansion correlates its words,
-        /// which can hide a form that reads the wrong one.
+        /// which can hide a form that reads the wrong one; the stream above
+        /// draws only expansions.
         #[test]
         fn forms_agree_on_arbitrary_words() {
             fn prop(w: [u32; 80]) -> bool {
@@ -536,199 +690,5 @@ mod tests {
                 .tests(2_000)
                 .quickcheck(prop as fn([u32; 80]) -> bool);
         }
-
-        /// The same, over schedules that a message can produce. This is the
-        /// distribution the check meets in use.
-        ///
-        /// Every target solves for its own plan, so the forms share no code.
-        /// They must still agree: a check that clears too few bits gives
-        /// correct digests and only causes more recompressions, so no other
-        /// test sees it.
-        #[test]
-        fn forms_agree_on_expanded_schedules() {
-            fn prop(m: [u32; 16]) -> bool {
-                diverging_form(&Schedule::expand(&m)).is_none()
-            }
-            QuickCheck::new()
-                .tests(20_000)
-                .quickcheck(prop as fn([u32; 16]) -> bool);
-        }
-
-        /// Turning off the vector forms must not change the answer. This is
-        /// the switch that `internal_scalar_backend` sets, and only a
-        /// property test reaches both sides of it on the same input.
-        #[test]
-        fn scalar_only_gives_the_same_mask() {
-            fn prop(m: [u32; 16]) -> bool {
-                let w = Schedule::expand(&m);
-                ubc_check(&w, true) == ubc_check(&w, false)
-            }
-            QuickCheck::new()
-                .tests(2_000)
-                .quickcheck(prop as fn([u32; 16]) -> bool);
-        }
-    }
-    /// Builds a message that keeps a chosen DV alive all the way through the
-    /// check.
-    ///
-    /// A random schedule is a poor way to reach the tail. Every check only
-    /// clears bits, so a DV survives only when all 7 to 15 of its conditions
-    /// hold at once, which a random schedule manages between once in 128 and
-    /// once in 33,000. The 20,000 random schedules of
-    /// [`properties::forms_agree_on_expanded_schedules`] therefore set the
-    /// rarest DVs once or not at all, and the checks behind them barely run.
-    ///
-    /// Searching for such a schedule is the wrong move, because the
-    /// conditions can be solved instead. Each one is a linear equation over
-    /// two bits of the expanded message, and the expansion is itself linear,
-    /// so every bit of `w` is a linear form over the 512 bits of the block.
-    /// One DV is then a system of at most 15 equations in 512 unknowns, which
-    /// leaves room to pick a different solution every time.
-    mod witness {
-        use super::conditions::CONDITIONS;
-
-        /// A linear form over the 512 message bits, one bit of `w`.
-        type Form = [u64; 8];
-
-        /// `forms[t][b]` is bit `b` of `w[t]`.
-        pub(super) type Forms = [[Form; 32]; 80];
-
-        fn xor(a: &Form, b: &Form) -> Form {
-            core::array::from_fn(|k| a[k] ^ b[k])
-        }
-
-        /// Whether the form holds an odd number of the bits set in `x`.
-        fn odd(a: &Form, x: &Form) -> u32 {
-            (0..8).fold(0, |p, k| p ^ (a[k] & x[k]).count_ones()) & 1
-        }
-
-        fn get(f: &Form, i: usize) -> u32 {
-            (f[i / 64] >> (i % 64)) as u32 & 1
-        }
-
-        /// Expands the message into linear forms, the way SHA-1 expands it
-        /// into words. Message bit `b` of word `t` is unknown `t * 32 + b`.
-        pub(super) fn forms() -> Forms {
-            let mut f: Forms = [[[0; 8]; 32]; 80];
-            for (t, word) in f.iter_mut().enumerate().take(16) {
-                for (b, form) in word.iter_mut().enumerate() {
-                    let unknown = t * 32 + b;
-                    form[unknown / 64] = 1 << (unknown % 64);
-                }
-            }
-            for t in 16..80 {
-                for b in 0..32 {
-                    // The expansion rotates left by one, so bit `b` of `w[t]`
-                    // is bit `b - 1` of the XOR of the four earlier words.
-                    let s = (b + 31) % 32;
-                    f[t][b] = core::array::from_fn(|k| {
-                        f[t - 3][s][k] ^ f[t - 8][s][k] ^ f[t - 14][s][k] ^ f[t - 16][s][k]
-                    });
-                }
-            }
-            f
-        }
-
-        /// A message whose expansion satisfies every condition of `dv`.
-        ///
-        /// `seed` picks which solution, so repeated calls explore the space
-        /// rather than repeating one witness.
-        pub(super) fn message(forms: &Forms, dv: usize, seed: &mut u64) -> [u32; 16] {
-            // At most 15 conditions name any one DV.
-            let mut rows = [([0u64; 8], 0u32); 16];
-            let mut n = 0;
-            for &(i, a, j, b, c, dvs) in &CONDITIONS {
-                if dvs >> dv & 1 == 1 {
-                    rows[n] = (
-                        xor(
-                            &forms[i as usize][a as usize],
-                            &forms[j as usize][b as usize],
-                        ),
-                        u32::from(c),
-                    );
-                    n += 1;
-                }
-            }
-
-            // Reduce so that each pivot unknown appears in one row only. Then
-            // every pivot can be set independently of the others.
-            let mut pivots = [0usize; 16];
-            let mut rank = 0;
-            for col in 0..512 {
-                let Some(found) = (rank..n).find(|&k| get(&rows[k].0, col) == 1) else {
-                    continue;
-                };
-                rows.swap(found, rank);
-                for k in 0..n {
-                    if k != rank && get(&rows[k].0, col) == 1 {
-                        let (coeff, rhs) = rows[rank];
-                        rows[k].0 = xor(&rows[k].0, &coeff);
-                        rows[k].1 ^= rhs;
-                    }
-                }
-                pivots[rank] = col;
-                rank += 1;
-                if rank == n {
-                    break;
-                }
-            }
-
-            // Every DV is satisfiable, so no row may be left demanding that
-            // an empty sum of bits is one.
-            for row in rows.iter().take(n).skip(rank) {
-                assert_eq!(row.1, 0, "conditions for DV {dv} are inconsistent");
-            }
-
-            // Take the free unknowns at random and the pivots from the rows.
-            let mut x = [0u64; 8];
-            for word in x.iter_mut() {
-                *seed ^= *seed << 13;
-                *seed ^= *seed >> 7;
-                *seed ^= *seed << 17;
-                *word = *seed;
-            }
-            for &col in pivots.iter().take(rank) {
-                x[col / 64] &= !(1 << (col % 64));
-            }
-            for k in 0..rank {
-                if odd(&rows[k].0, &x) != rows[k].1 {
-                    let col = pivots[k];
-                    x[col / 64] |= 1 << (col % 64);
-                }
-            }
-
-            core::array::from_fn(|t| (0..32).fold(0u32, |acc, b| acc | (get(&x, t * 32 + b) << b)))
-        }
-    }
-
-    /// The forms must agree where the tail actually runs.
-    ///
-    /// [`properties::forms_agree_on_expanded_schedules`] covers the prefix
-    /// well and the tail badly, because it takes schedules as they come.
-    /// These are built to reach it: every DV is kept alive, sixty-four times
-    /// over, so that the checks behind even the rarest of them run.
-    #[test]
-    fn every_form_matches_scalar_where_the_tail_runs() {
-        const PER_DV: usize = 64;
-
-        let forms = witness::forms();
-        let mut seed = 0x243f_6a88_85a3_08d3u64;
-        let mut seen = 0u32;
-
-        for dv in 0..32 {
-            for _ in 0..PER_DV {
-                let w = Schedule::expand(&witness::message(&forms, dv, &mut seed));
-
-                let mask = ubc_check(&w, true);
-                assert_ne!(mask >> dv & 1, 0, "the witness for DV {dv} did not survive");
-                seen |= mask;
-
-                if let Some(form) = diverging_form(&w) {
-                    panic!("{form} diverged on a witness for DV {dv}");
-                }
-            }
-        }
-
-        assert_eq!(seen, u32::MAX, "a DV was not covered");
     }
 }

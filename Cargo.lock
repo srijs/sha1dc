@@ -471,6 +471,9 @@ dependencies = [
 [[package]]
 name = "sha1dc-codegen"
 version = "0.0.0"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "shlex"
