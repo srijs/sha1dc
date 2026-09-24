@@ -23,6 +23,41 @@ pub fn align(f: &Family) -> (i32, u32) {
     }
 }
 
+/// The bit a member with near bit `a` is tested at, once [`align`] has lined
+/// up its two words by `shift`.
+pub fn test_bit(shift: i32, a: u32) -> u32 {
+    (a as i32 + shift.min(0)) as u32
+}
+
+/// Whether every lane of `g` that checks anything tests `bit`, so that one
+/// broadcast constant serves the whole group.
+fn uniform(g: &Group, bit: u32) -> bool {
+    g.iter().filter_map(|m| m.2).all(|b| b == bit)
+}
+
+/// The constant a group's lanes are tested against, as source: a broadcast
+/// of `1 << bit` where every lane that checks anything tests `bit`, and
+/// otherwise `per_lane` of each lane's own, `one(bit)` where the lane tests
+/// `bit` and 0 where it tests nothing.
+pub fn test_const(
+    g: &Group,
+    bit: u32,
+    width: usize,
+    broadcast: &str,
+    per_lane: impl Fn(&str) -> String,
+    one: impl Fn(u32) -> String,
+) -> String {
+    if uniform(g, bit) {
+        format!("{broadcast}(1 << {bit})")
+    } else {
+        let masks: Vec<String> = g
+            .iter()
+            .map(|m| m.2.map_or_else(|| "0".to_owned(), &one))
+            .collect();
+        per_lane(&lanes(&masks, "        ", width))
+    }
+}
+
 /// The DV bits as source, for example `DV_I_43_0_BIT | DV_I_45_0_BIT`.
 pub fn dv_expr(dvs: u32) -> String {
     let names: Vec<&str> = (0..32)
@@ -32,26 +67,49 @@ pub fn dv_expr(dvs: u32) -> String {
     names.join(" | ")
 }
 
-/// One vector group: the checks that share a pair of loads.
-pub type Group = Vec<(usize, String)>;
+/// One vector group: the checks that share a pair of loads, as `(i, DV bits,
+/// the bit tested)` per lane. A lane with no member tests nothing.
+pub type Group = Vec<(usize, String, Option<u32>)>;
+
+/// Where the groups of a family go: the start of each window and how many
+/// of the members `is` it takes, in order.
+///
+/// One pair of loads covers `width` consecutive `i`, so a window takes every
+/// member that falls in it. A lane the family has no member for takes no DV
+/// bits and clears nothing, which is what the group would have cost anyway
+/// had the window been shorter. A window starts at its first member, or
+/// earlier where that would take its far load past the end of the schedule.
+/// The solver counts its budget with this same walk.
+pub fn windows(is: &[usize], width: usize, offset: usize) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut rest = is;
+    while let Some(&first) = rest.first() {
+        let base = first.min(SCHEDULE - width - offset);
+        let n = rest.iter().take_while(|&&i| i < base + width).count();
+        out.push((base, n));
+        rest = &rest[n..];
+    }
+    out
+}
 
 /// Only a continuous range can share one vector load.
 pub fn lane_groups(f: &Family, width: usize) -> Vec<Group> {
+    let (shift, _) = align(f);
+    let is: Vec<usize> = f.members.iter().map(|m| m.0).collect();
     let mut out = Vec::new();
     let mut rest = f.members.as_slice();
-    while let Some(&(base, _)) = rest.first() {
-        // One pair of loads covers `width` consecutive `i`, so a member is in
-        // this group if it falls in that window. A lane the family has no
-        // member for takes no DV bits and clears nothing, which is what the
-        // group would have cost anyway had the window been shorter.
-        let n = rest.iter().take_while(|(i, _)| *i < base + width).count();
+    for (base, n) in windows(&is, width, f.offset) {
         let (window, tail) = rest.split_at(n);
         out.push(
             (0..width)
                 .map(|k| {
                     let i = base + k;
-                    let dvs = window.iter().find(|(m, _)| *m == i).map(|&(_, d)| d);
-                    (i, dvs.map_or_else(|| "0".to_owned(), dv_expr))
+                    let member = window.iter().find(|(m, _, _)| *m == i);
+                    (
+                        i,
+                        member.map_or_else(|| "0".to_owned(), |&(_, _, d)| dv_expr(d)),
+                        member.map(|&(_, a, _)| test_bit(shift, a)),
+                    )
                 })
                 .collect(),
         );
@@ -95,11 +153,11 @@ pub fn highest_read(plan: &Plan, width: usize) -> usize {
 
 /// Lane initializers. A short group gets a mask that clears no bits, so the
 /// group still fills one vector.
-pub fn lanes(bits: &[&str], indent: &str, width: usize) -> String {
+pub fn lanes(bits: &[impl AsRef<str>], indent: &str, width: usize) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     for i in 0..width {
-        let value = bits.get(i).copied().unwrap_or("0");
+        let value = bits.get(i).map_or("0", AsRef::as_ref);
         let _ = write!(out, "\n{indent}    {value},");
     }
     let _ = write!(out, "\n{indent}");

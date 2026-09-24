@@ -28,8 +28,9 @@
 //! file that changed, one that is missing, and one that this generator no
 //! longer emits.
 //!
-//! `SHA1DC_<TARGET>_WIDTH` and `SHA1DC_<TARGET>_GROUPS` override a budget,
-//! for measuring. `--check` ignores them, so that a shell with one set still
+//! `SHA1DC_<TARGET>_WIDTH`, `SHA1DC_<TARGET>_GROUPS` and
+//! `SHA1DC_<TARGET>_SHAPE` (`strict` or `lanemask`) override a plan, for
+//! measuring. `--check` ignores them, so that a shell with one set still
 //! compares against the committed plan.
 //!
 //! It also runs upstream's C check, which `build.rs` compiles in, reads its
@@ -43,6 +44,7 @@
 mod avx2;
 mod emit;
 mod neon;
+mod padding;
 mod scalar;
 mod solve;
 mod sse2;
@@ -55,11 +57,14 @@ use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
+use solve::Shape;
+
 /// What each target solves for.
 ///
-/// `width` is the lane count a group is costed against, and `groups` is how
-/// many groups the prefix may spend. A group runs on every block, so the
-/// budget trades unconditional work against the guarded tail.
+/// `width` is the lane count a group is costed against, `groups` how many
+/// groups the prefix may spend, and `shape` what the lanes of one group
+/// share. A group runs on every block, so the budget trades unconditional
+/// work against the guarded tail.
 ///
 /// Every target has its own optimum, measured with `bench/` on an Apple M4, a
 /// Xeon Platinum 8488C and a Graviton4. Re-measure them when the solver or an
@@ -69,21 +74,25 @@ const TARGETS: &[Target] = &[
         name: "scalar",
         width: 1,
         groups: 70,
+        shape: Shape::Strict,
     },
     Target {
         name: "neon",
         width: 4,
         groups: 20,
+        shape: Shape::LaneMask,
     },
     Target {
         name: "sse2",
         width: 4,
         groups: 26,
+        shape: Shape::LaneMask,
     },
     Target {
         name: "avx2",
         width: 8,
         groups: 14,
+        shape: Shape::LaneMask,
     },
 ];
 
@@ -91,14 +100,16 @@ struct Target {
     name: &'static str,
     width: usize,
     groups: usize,
+    shape: Shape,
 }
 
 /// Reads a tunable from the environment, for measuring.
-fn tunable(name: &str, fallback: usize) -> usize {
+fn tunable<T: std::str::FromStr>(name: &str, fallback: T) -> T
+where
+    T::Err: std::fmt::Display,
+{
     match std::env::var(name) {
-        Ok(n) => n
-            .parse()
-            .unwrap_or_else(|_| panic!("{name} must be a number")),
+        Ok(v) => v.parse().unwrap_or_else(|e| panic!("{name}: {e}")),
         Err(_) => fallback,
     }
 }
@@ -145,18 +156,19 @@ fn generate(tuned: bool) -> io::Result<Vec<(String, String)>> {
 
     for target in TARGETS {
         let name = target.name.to_uppercase();
-        let (width, groups) = if tuned {
+        let (width, groups, shape) = if tuned {
             (
                 tunable(&format!("SHA1DC_{name}_WIDTH"), target.width),
                 tunable(&format!("SHA1DC_{name}_GROUPS"), target.groups),
+                tunable(&format!("SHA1DC_{name}_SHAPE"), target.shape),
             )
         } else {
-            (target.width, target.groups)
+            (target.width, target.groups, target.shape)
         };
 
         files.push((
             format!("{}.rs", target.name),
-            rustfmt(&form(target.name, width, groups))?,
+            rustfmt(&form(target.name, width, groups, shape))?,
         ));
     }
 
@@ -168,8 +180,8 @@ fn generate(tuned: bool) -> io::Result<Vec<(String, String)>> {
 }
 
 /// One form of the check, before formatting.
-fn form(name: &str, width: usize, groups: usize) -> String {
-    let plan = solve::solve(width, groups);
+fn form(name: &str, width: usize, groups: usize, shape: Shape) -> String {
+    let plan = solve::solve(width, groups, shape);
     let prefix = match name {
         "scalar" => scalar::emit(&plan),
         "neon" => neon::emit(&plan),
@@ -288,9 +300,15 @@ fn report() {
             "\n{} — costed at {} lane(s), shipping {} groups",
             target.name, target.width, target.groups
         );
-        println!("groups  families  checks  tail  shared  per-DV  worst  P(tail)");
-        for n in [8, 10, 13, 16, 20, 22, 26, 30, 40, 55] {
-            let plan = solve::solve(target.width, n);
+        println!(
+            "groups  families  checks  tail  shared  per-DV  worst  P(tail)  last: enters  DVs"
+        );
+        // The shipped budget among them, wherever it falls.
+        let mut budgets = vec![8, 10, 13, 16, 20, 22, 26, 30, 40, 55, target.groups];
+        budgets.sort_unstable();
+        budgets.dedup();
+        for n in budgets {
+            let plan = solve::solve(target.width, n, target.shape);
             let checks: usize = plan.families.iter().map(|f| f.members.len()).sum();
             let shared = plan.tail.iter().filter(|c| c.dvs.count_ones() > 1).count();
             // A DV the prefix covers to rank `r` reaches the tail with
@@ -301,8 +319,11 @@ fn report() {
                     .iter()
                     .map(|&r| 1.0 - (-(r as f64) * std::f64::consts::LN_2).exp())
                     .product::<f64>();
+            // The same for the last block of a message, which is mostly
+            // padding and so passes or fails a condition every time.
+            let (last, dvs) = padding::tail_of(&plan);
             println!(
-                "{n:>6}  {:>8}  {checks:>6}  {:>4}  {shared:>6}  {:>6}  {:>5}  {enters:>7.4}",
+                "{n:>6}  {:>8}  {checks:>6}  {:>4}  {shared:>6}  {:>6}  {:>5}  {enters:>7.4}  {last:>12.3}  {dvs:>4.2}",
                 plan.families.len(),
                 plan.tail.len(),
                 plan.tail.len() - shared,
@@ -322,7 +343,7 @@ mod tests {
     fn every_budget_emits_valid_source() {
         for target in TARGETS {
             for groups in [0, 1, 100] {
-                rustfmt(&form(target.name, target.width, groups))
+                rustfmt(&form(target.name, target.width, groups, target.shape))
                     .unwrap_or_else(|e| panic!("{} at {groups} groups: {e}", target.name));
             }
         }

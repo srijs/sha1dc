@@ -8,7 +8,7 @@
 
 use std::fmt::Write as _;
 
-use crate::emit::{align, dv_expr};
+use crate::emit::{align, dv_expr, test_bit};
 use crate::solve::Plan;
 
 pub fn emit(plan: &Plan) -> String {
@@ -25,8 +25,9 @@ fn prefix(w: &Schedule) -> u32 {
 
     for f in &plan.families {
         out.push('\n');
-        let (shift, bit) = align(f);
-        for &(i, dvs) in &f.members {
+        let (shift, _) = align(f);
+        for &(i, a, dvs) in &f.members {
+            let bit = test_bit(shift, a);
             let (near, far) = (i, i + f.offset);
             // A zero shift is not written out: `w[i] >> 0` is an identity that
             // clippy rejects.

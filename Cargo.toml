@@ -31,6 +31,7 @@ default = ["std"]
 std = []
 
 # The generator runs upstream's check a few million times to read its rules
-# off, which takes minutes unoptimised and seconds optimised.
+# off, and solves every form on each run, in its tests and in `--check` too:
+# unoptimised, that takes minutes rather than seconds.
 [profile.dev.package.sha1dc-codegen]
 opt-level = 3

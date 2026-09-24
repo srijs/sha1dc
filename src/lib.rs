@@ -12,7 +12,7 @@
 //!
 //! Where available, the implementation uses SHA-1 hardware instructions on `x86_64` and `aarch64`,
 //! as well as SIMD-enabled algorithms. Nonetheless, detection does more work per block than plain
-//! SHA-1, and costs 19% to 30% of throughput, depending on the machine.
+//! SHA-1, and costs 21% to 29% of throughput, depending on the machine.
 //!
 //! Two modes are provided, as two separate `Hasher` structs. [`Hasher`] keeps the standard digest,
 //! with output equivalent to a non-detecting SHA-1 implementation. [`mitigate::Hasher`] computes an
