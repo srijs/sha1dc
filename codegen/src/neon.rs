@@ -18,7 +18,7 @@
 
 use std::fmt::Write as _;
 
-use crate::emit::{align, all_groups, highest_read, lanes};
+use crate::emit::{align, all_groups, highest_read, lanes, test_const};
 use crate::solve::Plan;
 
 const W: usize = 4;
@@ -63,10 +63,16 @@ fn prefix(w: &Schedule) -> u32 {
                 -shift
             );
         }
-        let _ = writeln!(
-            out,
-            "        let set = vtstq_u32(x, vdupq_n_u32(1 << {bit}));"
+        // With a bit per lane, the mask goes through memory like the DV bits.
+        let mask = test_const(
+            g,
+            bit,
+            W,
+            "vdupq_n_u32",
+            |l| format!("splat([{l}])"),
+            |b| format!("1 << {b}"),
         );
+        let _ = writeln!(out, "        let set = vtstq_u32(x, {mask});");
         let _ = writeln!(
             out,
             "        let bits = splat([{}]);",

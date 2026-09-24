@@ -42,7 +42,7 @@ pub(super) fn check(w: &Schedule) -> u32 {
 
 /// The checks that run on every block. Requires `sse2`.
 ///
-/// The highest index read is 65, and every load proves its own bound.
+/// The highest index read is 64, and every load proves its own bound.
 #[inline]
 #[target_feature(enable = "sse2")]
 fn prefix(w: &Schedule) -> u32 {
@@ -54,13 +54,21 @@ fn prefix(w: &Schedule) -> u32 {
         let near = load::<35>(w);
         let far = load::<36>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 5));
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 1));
+        let tested = _mm_and_si128(
+            x,
+            _mm_set_epi32(
+                (1u32 << 1) as i32,
+                (1u32 << 1) as i32,
+                (1u32 << 1) as i32,
+                (1u32 << 0) as i32,
+            ),
+        );
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
             (DV_I_46_2_BIT | DV_I_49_2_BIT) as i32,
             (DV_I_47_2_BIT | DV_I_50_2_BIT | DV_II_46_2_BIT) as i32,
             (DV_I_48_2_BIT | DV_I_51_2_BIT) as i32,
-            0,
+            (DV_II_51_2_BIT) as i32,
         );
         acc0 = _mm_or_si128(acc0, _mm_and_si128(miss, bits));
     }
@@ -69,13 +77,21 @@ fn prefix(w: &Schedule) -> u32 {
         let near = load::<36>(w);
         let far = load::<37>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 5));
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 0));
+        let tested = _mm_and_si128(
+            x,
+            _mm_set_epi32(
+                (1u32 << 0) as i32,
+                (1u32 << 0) as i32,
+                (1u32 << 1) as i32,
+                (1u32 << 1) as i32,
+            ),
+        );
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
             (DV_II_49_2_BIT) as i32,
             (DV_II_50_2_BIT) as i32,
-            (DV_II_51_2_BIT) as i32,
-            0,
+            (DV_I_49_2_BIT) as i32,
+            (DV_I_46_2_BIT | DV_I_50_2_BIT | DV_II_49_2_BIT) as i32,
         );
         acc1 = _mm_or_si128(acc1, _mm_and_si128(miss, bits));
     }
@@ -84,73 +100,109 @@ fn prefix(w: &Schedule) -> u32 {
         let near = load::<36>(w);
         let far = load::<38>(w);
         let x = _mm_xor_si128(near, far);
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
+        let tested = _mm_and_si128(
+            x,
+            _mm_set_epi32(
+                (1u32 << 4) as i32,
+                (1u32 << 4) as i32,
+                (1u32 << 1) as i32,
+                (1u32 << 4) as i32,
+            ),
+        );
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
             (DV_II_52_0_BIT | DV_II_54_0_BIT) as i32,
             (DV_I_43_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT) as i32,
-            (DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT) as i32,
+            (DV_I_49_2_BIT) as i32,
             (DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT) as i32,
         );
         acc0 = _mm_or_si128(acc0, _mm_and_si128(miss, bits));
     }
 
     {
-        let near = load::<38>(w);
+        let near = load::<35>(w);
         let far = load::<39>(w);
-        let x = _mm_xor_si128(near, _mm_srli_epi32(far, 5));
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 1));
+        let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
+        let tested = _mm_and_si128(
+            x,
+            _mm_set_epi32(
+                (1u32 << 4) as i32,
+                (1u32 << 4) as i32,
+                (1u32 << 5) as i32,
+                (1u32 << 5) as i32,
+            ),
+        );
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
-            (DV_I_49_2_BIT) as i32,
-            (DV_I_46_2_BIT | DV_I_50_2_BIT | DV_II_49_2_BIT) as i32,
-            (DV_I_47_2_BIT | DV_I_51_2_BIT | DV_II_50_2_BIT) as i32,
-            (DV_I_48_2_BIT | DV_II_46_2_BIT | DV_II_51_2_BIT) as i32,
+            (DV_I_45_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT) as i32,
+            (DV_I_46_0_BIT | DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT) as i32,
+            (DV_II_49_2_BIT) as i32,
+            (DV_II_50_2_BIT) as i32,
         );
-        acc1 = _mm_or_si128(acc1, _mm_and_si128(miss, bits));
+        acc1 = _mm_or_si128(acc1, _mm_andnot_si128(miss, bits));
     }
 
     {
-        let near = load::<39>(w);
+        let near = load::<38>(w);
         let far = load::<40>(w);
-        let x = _mm_xor_si128(_mm_srli_epi32(near, 5), far);
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 1));
+        let x = _mm_xor_si128(near, far);
+        let tested = _mm_and_si128(
+            x,
+            _mm_set_epi32(
+                (1u32 << 4) as i32,
+                (1u32 << 1) as i32,
+                (1u32 << 1) as i32,
+                (1u32 << 1) as i32,
+            ),
+        );
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
-            (DV_I_49_2_BIT) as i32,
+            (DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT) as i32,
             (DV_I_50_2_BIT | DV_II_49_2_BIT) as i32,
             (DV_I_51_2_BIT | DV_II_50_2_BIT) as i32,
             (DV_II_46_2_BIT | DV_II_51_2_BIT) as i32,
         );
-        acc0 = _mm_or_si128(acc0, _mm_andnot_si128(miss, bits));
+        acc0 = _mm_or_si128(acc0, _mm_and_si128(miss, bits));
     }
 
     {
-        let near = load::<39>(w);
+        let near = load::<37>(w);
         let far = load::<40>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
-            (DV_I_43_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT) as i32,
-            (DV_I_44_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT) as i32,
-            (DV_I_43_0_BIT | DV_I_45_0_BIT | DV_II_55_0_BIT) as i32,
-            (DV_I_44_0_BIT | DV_I_46_0_BIT | DV_II_56_0_BIT) as i32,
+            (DV_I_43_0_BIT | DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_53_0_BIT | DV_II_55_0_BIT)
+                as i32,
+            (DV_I_44_0_BIT | DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_54_0_BIT | DV_II_56_0_BIT)
+                as i32,
+            (DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_49_0_BIT | DV_II_48_0_BIT | DV_II_55_0_BIT)
+                as i32,
+            (DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT)
+                as i32,
         );
-        acc1 = _mm_or_si128(acc1, _mm_and_si128(miss, bits));
+        acc1 = _mm_or_si128(acc1, _mm_andnot_si128(miss, bits));
     }
 
     {
-        let near = load::<36>(w);
-        let far = load::<40>(w);
+        let near = load::<37>(w);
+        let far = load::<41>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
+        let tested = _mm_and_si128(
+            x,
+            _mm_set_epi32(
+                (1u32 << 4) as i32,
+                (1u32 << 4) as i32,
+                (1u32 << 5) as i32,
+                (1u32 << 3) as i32,
+            ),
+        );
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
-            (DV_I_46_0_BIT | DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT) as i32,
             (DV_I_47_0_BIT | DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT) as i32,
             (DV_I_48_0_BIT | DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT) as i32,
-            (DV_I_49_0_BIT | DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_51_0_BIT) as i32,
+            (DV_II_51_2_BIT) as i32,
+            (DV_II_52_0_BIT) as i32,
         );
         acc0 = _mm_or_si128(acc0, _mm_andnot_si128(miss, bits));
     }
@@ -158,18 +210,48 @@ fn prefix(w: &Schedule) -> u32 {
     {
         let near = load::<40>(w);
         let far = load::<41>(w);
+        let x = _mm_xor_si128(near, _mm_srli_epi32(far, 5));
+        let tested = _mm_and_si128(
+            x,
+            _mm_set_epi32(
+                (1u32 << 1) as i32,
+                (1u32 << 1) as i32,
+                (1u32 << 1) as i32,
+                (1u32 << 1) as i32,
+            ),
+        );
+        let miss = _mm_cmpeq_epi32(tested, zero);
+        let bits = _mm_set_epi32(
+            (DV_I_47_2_BIT | DV_I_51_2_BIT | DV_II_50_2_BIT) as i32,
+            (DV_I_48_2_BIT | DV_II_46_2_BIT | DV_II_51_2_BIT) as i32,
+            (DV_I_49_2_BIT) as i32,
+            (DV_I_50_2_BIT) as i32,
+        );
+        acc1 = _mm_or_si128(acc1, _mm_and_si128(miss, bits));
+    }
+
+    {
+        let near = load::<40>(w);
+        let far = load::<42>(w);
+        let x = _mm_xor_si128(near, far);
+        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
+        let miss = _mm_cmpeq_epi32(tested, zero);
+        let bits = _mm_set_epi32(
+            (DV_I_44_0_BIT | DV_I_46_0_BIT | DV_II_56_0_BIT) as i32,
+            (DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_47_0_BIT) as i32,
+            (DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_48_0_BIT) as i32,
+            (DV_I_45_0_BIT | DV_I_47_0_BIT | DV_I_49_0_BIT) as i32,
+        );
+        acc0 = _mm_or_si128(acc0, _mm_and_si128(miss, bits));
+    }
+
+    {
+        let near = load::<42>(w);
+        let far = load::<43>(w);
         let x = _mm_xor_si128(near, far);
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 29));
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
-            (DV_I_44_0_BIT
-                | DV_I_47_0_BIT
-                | DV_I_48_0_BIT
-                | DV_II_46_0_BIT
-                | DV_II_47_0_BIT
-                | DV_II_56_0_BIT) as i32,
-            (DV_I_45_0_BIT | DV_I_48_0_BIT | DV_I_49_0_BIT | DV_II_47_0_BIT | DV_II_48_0_BIT)
-                as i32,
             (DV_I_46_0_BIT | DV_I_49_0_BIT | DV_I_50_0_BIT | DV_II_48_0_BIT | DV_II_49_0_BIT)
                 as i32,
             (DV_I_47_0_BIT
@@ -178,34 +260,30 @@ fn prefix(w: &Schedule) -> u32 {
                 | DV_II_45_0_BIT
                 | DV_II_49_0_BIT
                 | DV_II_50_0_BIT) as i32,
+            (DV_I_48_0_BIT
+                | DV_I_51_0_BIT
+                | DV_I_52_0_BIT
+                | DV_II_45_0_BIT
+                | DV_II_46_0_BIT
+                | DV_II_50_0_BIT
+                | DV_II_51_0_BIT) as i32,
+            (DV_I_49_0_BIT
+                | DV_I_52_0_BIT
+                | DV_II_46_0_BIT
+                | DV_II_47_0_BIT
+                | DV_II_51_0_BIT
+                | DV_II_52_0_BIT) as i32,
         );
         acc1 = _mm_or_si128(acc1, _mm_andnot_si128(miss, bits));
     }
 
     {
-        let near = load::<39>(w);
-        let far = load::<42>(w);
-        let x = _mm_xor_si128(near, _mm_srli_epi32(far, 5));
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 1));
-        let miss = _mm_cmpeq_epi32(tested, zero);
-        let bits = _mm_set_epi32(
-            (DV_I_46_2_BIT) as i32,
-            (DV_I_47_2_BIT) as i32,
-            (DV_I_48_2_BIT) as i32,
-            (DV_I_49_2_BIT) as i32,
-        );
-        acc0 = _mm_or_si128(acc0, _mm_and_si128(miss, bits));
-    }
-
-    {
-        let near = load::<40>(w);
-        let far = load::<43>(w);
+        let near = load::<41>(w);
+        let far = load::<44>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
-            (DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_50_0_BIT | DV_II_49_0_BIT | DV_II_56_0_BIT)
-                as i32,
             (DV_I_43_0_BIT
                 | DV_I_45_0_BIT
                 | DV_I_47_0_BIT
@@ -224,8 +302,14 @@ fn prefix(w: &Schedule) -> u32 {
                 | DV_I_49_0_BIT
                 | DV_II_47_0_BIT
                 | DV_II_52_0_BIT) as i32,
+            (DV_I_44_0_BIT
+                | DV_I_46_0_BIT
+                | DV_I_48_0_BIT
+                | DV_I_50_0_BIT
+                | DV_II_48_0_BIT
+                | DV_II_53_0_BIT) as i32,
         );
-        acc1 = _mm_or_si128(acc1, _mm_andnot_si128(miss, bits));
+        acc0 = _mm_or_si128(acc0, _mm_andnot_si128(miss, bits));
     }
 
     {
@@ -240,56 +324,28 @@ fn prefix(w: &Schedule) -> u32 {
             (DV_I_46_2_BIT | DV_I_48_2_BIT | DV_I_50_2_BIT) as i32,
             (DV_I_47_2_BIT | DV_I_49_2_BIT | DV_I_51_2_BIT) as i32,
         );
-        acc0 = _mm_or_si128(acc0, _mm_andnot_si128(miss, bits));
+        acc1 = _mm_or_si128(acc1, _mm_andnot_si128(miss, bits));
     }
 
     {
-        let near = load::<43>(w);
+        let near = load::<40>(w);
         let far = load::<44>(w);
-        let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
-        let miss = _mm_cmpeq_epi32(tested, zero);
-        let bits = _mm_set_epi32(
-            (DV_I_43_0_BIT | DV_I_45_0_BIT | DV_I_47_0_BIT) as i32,
-            (DV_I_44_0_BIT | DV_I_46_0_BIT | DV_I_48_0_BIT) as i32,
-            (DV_I_45_0_BIT | DV_I_47_0_BIT | DV_I_49_0_BIT) as i32,
-            (DV_I_46_0_BIT | DV_I_48_0_BIT | DV_I_50_0_BIT) as i32,
-        );
-        acc1 = _mm_or_si128(acc1, _mm_and_si128(miss, bits));
-    }
-
-    {
-        let near = load::<44>(w);
-        let far = load::<45>(w);
         let x = _mm_xor_si128(near, far);
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 29));
+        let tested = _mm_and_si128(
+            x,
+            _mm_set_epi32(
+                (1u32 << 6) as i32,
+                (1u32 << 6) as i32,
+                (1u32 << 4) as i32,
+                (1u32 << 4) as i32,
+            ),
+        );
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
-            (DV_I_48_0_BIT
-                | DV_I_51_0_BIT
-                | DV_I_52_0_BIT
-                | DV_II_45_0_BIT
-                | DV_II_46_0_BIT
-                | DV_II_50_0_BIT
-                | DV_II_51_0_BIT) as i32,
-            (DV_I_49_0_BIT
-                | DV_I_52_0_BIT
-                | DV_II_46_0_BIT
-                | DV_II_47_0_BIT
-                | DV_II_51_0_BIT
-                | DV_II_52_0_BIT) as i32,
-            (DV_I_43_0_BIT
-                | DV_I_50_0_BIT
-                | DV_II_47_0_BIT
-                | DV_II_48_0_BIT
-                | DV_II_52_0_BIT
-                | DV_II_53_0_BIT) as i32,
-            (DV_I_44_0_BIT
-                | DV_I_51_0_BIT
-                | DV_II_48_0_BIT
-                | DV_II_49_0_BIT
-                | DV_II_53_0_BIT
-                | DV_II_54_0_BIT) as i32,
+            (DV_I_46_2_BIT) as i32,
+            (DV_I_47_2_BIT) as i32,
+            (DV_I_46_0_BIT | DV_I_48_0_BIT) as i32,
+            (DV_I_47_0_BIT | DV_I_49_0_BIT) as i32,
         );
         acc0 = _mm_or_si128(acc0, _mm_andnot_si128(miss, bits));
     }
@@ -325,18 +381,47 @@ fn prefix(w: &Schedule) -> u32 {
     }
 
     {
-        let near = load::<44>(w);
+        let near = load::<46>(w);
         let far = load::<47>(w);
+        let x = _mm_xor_si128(near, far);
+        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 29));
+        let miss = _mm_cmpeq_epi32(tested, zero);
+        let bits = _mm_set_epi32(
+            (DV_I_43_0_BIT
+                | DV_I_50_0_BIT
+                | DV_II_47_0_BIT
+                | DV_II_48_0_BIT
+                | DV_II_52_0_BIT
+                | DV_II_53_0_BIT) as i32,
+            (DV_I_44_0_BIT
+                | DV_I_51_0_BIT
+                | DV_II_48_0_BIT
+                | DV_II_49_0_BIT
+                | DV_II_53_0_BIT
+                | DV_II_54_0_BIT) as i32,
+            (DV_I_45_0_BIT
+                | DV_I_52_0_BIT
+                | DV_II_49_0_BIT
+                | DV_II_50_0_BIT
+                | DV_II_54_0_BIT
+                | DV_II_55_0_BIT) as i32,
+            (DV_I_46_0_BIT
+                | DV_II_45_0_BIT
+                | DV_II_50_0_BIT
+                | DV_II_51_0_BIT
+                | DV_II_55_0_BIT
+                | DV_II_56_0_BIT) as i32,
+        );
+        acc1 = _mm_or_si128(acc1, _mm_andnot_si128(miss, bits));
+    }
+
+    {
+        let near = load::<45>(w);
+        let far = load::<48>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
-            (DV_I_44_0_BIT
-                | DV_I_46_0_BIT
-                | DV_I_48_0_BIT
-                | DV_I_50_0_BIT
-                | DV_II_48_0_BIT
-                | DV_II_53_0_BIT) as i32,
             (DV_I_45_0_BIT
                 | DV_I_47_0_BIT
                 | DV_I_49_0_BIT
@@ -355,8 +440,10 @@ fn prefix(w: &Schedule) -> u32 {
                 | DV_II_45_0_BIT
                 | DV_II_51_0_BIT
                 | DV_II_56_0_BIT) as i32,
+            (DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_52_0_BIT)
+                as i32,
         );
-        acc1 = _mm_or_si128(acc1, _mm_andnot_si128(miss, bits));
+        acc0 = _mm_or_si128(acc0, _mm_andnot_si128(miss, bits));
     }
 
     {
@@ -371,157 +458,162 @@ fn prefix(w: &Schedule) -> u32 {
             (DV_I_50_2_BIT | DV_II_46_2_BIT) as i32,
             (DV_I_51_2_BIT) as i32,
         );
-        acc0 = _mm_or_si128(acc0, _mm_andnot_si128(miss, bits));
-    }
-
-    {
-        let near = load::<48>(w);
-        let far = load::<49>(w);
-        let x = _mm_xor_si128(near, far);
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 29));
-        let miss = _mm_cmpeq_epi32(tested, zero);
-        let bits = _mm_set_epi32(
-            (DV_I_45_0_BIT
-                | DV_I_52_0_BIT
-                | DV_II_49_0_BIT
-                | DV_II_50_0_BIT
-                | DV_II_54_0_BIT
-                | DV_II_55_0_BIT) as i32,
-            (DV_I_46_0_BIT
-                | DV_II_45_0_BIT
-                | DV_II_50_0_BIT
-                | DV_II_51_0_BIT
-                | DV_II_55_0_BIT
-                | DV_II_56_0_BIT) as i32,
-            (DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_51_0_BIT | DV_II_52_0_BIT | DV_II_56_0_BIT)
-                as i32,
-            (DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_52_0_BIT | DV_II_53_0_BIT) as i32,
-        );
         acc1 = _mm_or_si128(acc1, _mm_andnot_si128(miss, bits));
     }
 
     {
-        let near = load::<48>(w);
-        let far = load::<49>(w);
+        let near = load::<49>(w);
+        let far = load::<50>(w);
         let x = _mm_xor_si128(_mm_srli_epi32(near, 5), far);
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 1));
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
-            (DV_I_48_2_BIT) as i32,
             (DV_I_49_2_BIT) as i32,
             (DV_I_50_2_BIT | DV_II_46_2_BIT) as i32,
             (DV_I_51_2_BIT) as i32,
+            0,
         );
         acc0 = _mm_or_si128(acc0, _mm_andnot_si128(miss, bits));
-    }
-
-    {
-        let near = load::<48>(w);
-        let far = load::<51>(w);
-        let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
-        let miss = _mm_cmpeq_epi32(tested, zero);
-        let bits = _mm_set_epi32(
-            (DV_I_48_0_BIT | DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_52_0_BIT)
-                as i32,
-            (DV_I_49_0_BIT | DV_I_51_0_BIT | DV_II_45_0_BIT | DV_II_47_0_BIT | DV_II_53_0_BIT)
-                as i32,
-            (DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_48_0_BIT | DV_II_54_0_BIT)
-                as i32,
-            (DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_49_0_BIT | DV_II_55_0_BIT) as i32,
-        );
-        acc1 = _mm_or_si128(acc1, _mm_andnot_si128(miss, bits));
     }
 
     {
         let near = load::<50>(w);
         let far = load::<51>(w);
-        let x = _mm_xor_si128(near, _mm_srli_epi32(far, 5));
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 1));
-        let miss = _mm_cmpeq_epi32(tested, zero);
-        let bits = _mm_set_epi32(
-            (DV_II_49_2_BIT) as i32,
-            (DV_II_50_2_BIT) as i32,
-            (DV_II_51_2_BIT) as i32,
-            0,
-        );
-        acc0 = _mm_or_si128(acc0, _mm_and_si128(miss, bits));
-    }
-
-    {
-        let near = load::<52>(w);
-        let far = load::<53>(w);
         let x = _mm_xor_si128(near, far);
         let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 29));
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
+            (DV_I_47_0_BIT | DV_II_46_0_BIT | DV_II_51_0_BIT | DV_II_52_0_BIT | DV_II_56_0_BIT)
+                as i32,
+            (DV_I_48_0_BIT | DV_II_47_0_BIT | DV_II_52_0_BIT | DV_II_53_0_BIT) as i32,
             (DV_I_49_0_BIT | DV_II_45_0_BIT | DV_II_48_0_BIT | DV_II_53_0_BIT | DV_II_54_0_BIT)
                 as i32,
             (DV_I_50_0_BIT | DV_II_46_0_BIT | DV_II_49_0_BIT | DV_II_54_0_BIT | DV_II_55_0_BIT)
                 as i32,
-            (DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_50_0_BIT | DV_II_55_0_BIT | DV_II_56_0_BIT)
-                as i32,
-            (DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_51_0_BIT | DV_II_56_0_BIT) as i32,
         );
         acc1 = _mm_or_si128(acc1, _mm_andnot_si128(miss, bits));
+    }
+
+    {
+        let near = load::<49>(w);
+        let far = load::<52>(w);
+        let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
+        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
+        let miss = _mm_cmpeq_epi32(tested, zero);
+        let bits = _mm_set_epi32(
+            (DV_I_49_0_BIT | DV_I_51_0_BIT | DV_II_45_0_BIT | DV_II_47_0_BIT | DV_II_53_0_BIT)
+                as i32,
+            (DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT | DV_II_48_0_BIT | DV_II_54_0_BIT)
+                as i32,
+            (DV_I_51_0_BIT | DV_II_47_0_BIT | DV_II_49_0_BIT | DV_II_55_0_BIT) as i32,
+            (DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_50_0_BIT | DV_II_56_0_BIT) as i32,
+        );
+        acc0 = _mm_or_si128(acc0, _mm_andnot_si128(miss, bits));
+    }
+
+    {
+        let near = load::<49>(w);
+        let far = load::<53>(w);
+        let x = _mm_xor_si128(near, far);
+        let tested = _mm_and_si128(
+            x,
+            _mm_set_epi32(
+                (1u32 << 29) as i32,
+                (1u32 << 1) as i32,
+                (1u32 << 1) as i32,
+                (1u32 << 1) as i32,
+            ),
+        );
+        let miss = _mm_cmpeq_epi32(tested, zero);
+        let bits = _mm_set_epi32(
+            (DV_II_45_0_BIT) as i32,
+            (DV_II_49_2_BIT) as i32,
+            (DV_II_50_2_BIT) as i32,
+            (DV_II_51_2_BIT) as i32,
+        );
+        acc1 = _mm_or_si128(acc1, _mm_and_si128(miss, bits));
     }
 
     {
         let near = load::<51>(w);
         let far = load::<53>(w);
         let x = _mm_xor_si128(near, far);
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 6));
+        let tested = _mm_and_si128(
+            x,
+            _mm_set_epi32(
+                (1u32 << 6) as i32,
+                (1u32 << 6) as i32,
+                (1u32 << 6) as i32,
+                (1u32 << 29) as i32,
+            ),
+        );
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
             (DV_II_49_2_BIT) as i32,
             (DV_II_50_2_BIT) as i32,
             (DV_II_51_2_BIT) as i32,
-            0,
+            (DV_II_56_0_BIT) as i32,
         );
         acc0 = _mm_or_si128(acc0, _mm_andnot_si128(miss, bits));
     }
 
     {
-        let near = load::<53>(w);
-        let far = load::<54>(w);
-        let x = _mm_xor_si128(_mm_srli_epi32(near, 5), far);
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 1));
+        let near = load::<51>(w);
+        let far = load::<53>(w);
+        let x = _mm_xor_si128(near, far);
+        let tested = _mm_and_si128(
+            x,
+            _mm_set_epi32(
+                (1u32 << 29) as i32,
+                (1u32 << 29) as i32,
+                (1u32 << 4) as i32,
+                (1u32 << 4) as i32,
+            ),
+        );
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
-            (DV_II_49_2_BIT) as i32,
-            (DV_II_50_2_BIT) as i32,
-            (DV_II_51_2_BIT) as i32,
-            0,
+            (DV_I_50_0_BIT | DV_I_52_0_BIT | DV_II_46_0_BIT) as i32,
+            (DV_I_51_0_BIT | DV_II_47_0_BIT) as i32,
+            (DV_II_51_0_BIT) as i32,
+            (DV_II_52_0_BIT) as i32,
         );
-        acc1 = _mm_or_si128(acc1, _mm_andnot_si128(miss, bits));
+        acc1 = _mm_or_si128(acc1, _mm_and_si128(miss, bits));
     }
 
     {
         let near = load::<53>(w);
         let far = load::<56>(w);
-        let x = _mm_xor_si128(near, _mm_srli_epi32(far, 25));
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 4));
+        let x = _mm_xor_si128(near, far);
+        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 29));
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
-            (DV_II_49_0_BIT | DV_II_51_0_BIT) as i32,
-            (DV_II_50_0_BIT | DV_II_52_0_BIT) as i32,
-            (DV_II_51_0_BIT | DV_II_53_0_BIT) as i32,
-            (DV_II_52_0_BIT | DV_II_54_0_BIT) as i32,
+            (DV_I_52_0_BIT | DV_II_48_0_BIT | DV_II_49_0_BIT) as i32,
+            (DV_II_49_0_BIT | DV_II_50_0_BIT) as i32,
+            (DV_II_50_0_BIT | DV_II_51_0_BIT) as i32,
+            (DV_II_51_0_BIT | DV_II_52_0_BIT) as i32,
         );
-        acc0 = _mm_or_si128(acc0, _mm_andnot_si128(miss, bits));
+        acc0 = _mm_or_si128(acc0, _mm_and_si128(miss, bits));
     }
 
     {
-        let near = load::<61>(w);
-        let far = load::<62>(w);
+        let near = load::<60>(w);
+        let far = load::<61>(w);
         let x = _mm_xor_si128(near, _mm_srli_epi32(far, 5));
-        let tested = _mm_and_si128(x, _mm_set1_epi32(1 << 2));
+        let tested = _mm_and_si128(
+            x,
+            _mm_set_epi32(
+                (1u32 << 0) as i32,
+                (1u32 << 2) as i32,
+                (1u32 << 2) as i32,
+                (1u32 << 2) as i32,
+            ),
+        );
         let miss = _mm_cmpeq_epi32(tested, zero);
         let bits = _mm_set_epi32(
+            (DV_I_45_0_BIT | DV_II_45_0_BIT) as i32,
             (DV_I_46_2_BIT | DV_II_46_2_BIT) as i32,
             (DV_I_47_2_BIT) as i32,
             (DV_I_48_2_BIT) as i32,
-            0,
         );
         acc1 = _mm_or_si128(acc1, _mm_and_si128(miss, bits));
     }
@@ -538,7 +630,7 @@ fn prefix(w: &Schedule) -> u32 {
 /// survives only where their XOR is `c`. A check that serves several DVs
 /// appears under each of them, which costs a little table and saves asking
 /// about DVs that are already dead.
-static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 101] = [
+static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 104] = [
     (58, 0, 59, 5, 1),
     (58, 0, 63, 30, 1),
     (61, 1, 62, 6, 1),
@@ -546,136 +638,139 @@ static TAIL_CHECKS: [(u8, u8, u8, u8, u8); 101] = [
     (59, 0, 60, 5, 1),
     (59, 0, 64, 30, 1),
     (62, 1, 63, 6, 1),
+    (38, 4, 40, 29, 0),
     (44, 4, 48, 29, 0),
-    (60, 0, 61, 5, 1),
     (63, 1, 64, 6, 1),
-    (35, 4, 39, 29, 0),
+    (39, 4, 41, 29, 0),
+    (44, 4, 46, 4, 1),
     (61, 0, 62, 5, 1),
     (45, 4, 47, 4, 1),
     (62, 0, 63, 5, 1),
+    (44, 4, 46, 4, 1),
     (46, 4, 48, 4, 1),
     (63, 0, 64, 5, 1),
-    (35, 4, 39, 29, 0),
+    (38, 4, 40, 29, 0),
     (45, 4, 47, 4, 1),
-    (47, 4, 49, 4, 1),
+    (39, 4, 41, 29, 0),
+    (39, 4, 43, 29, 0),
+    (45, 4, 49, 4, 0),
     (36, 4, 37, 4, 1),
+    (44, 4, 46, 4, 1),
     (46, 4, 48, 4, 1),
-    (48, 4, 50, 4, 1),
     (40, 4, 44, 29, 0),
-    (43, 1, 44, 6, 1),
     (37, 4, 38, 4, 1),
     (45, 4, 47, 4, 1),
-    (47, 4, 49, 4, 1),
-    (52, 29, 55, 29, 1),
     (35, 3, 39, 28, 0),
     (41, 4, 45, 29, 0),
+    (45, 4, 49, 4, 0),
+    (54, 29, 55, 29, 0),
     (35, 5, 39, 30, 0),
     (37, 1, 37, 6, 0),
     (38, 4, 39, 4, 1),
     (46, 4, 48, 4, 1),
-    (48, 4, 50, 4, 1),
-    (53, 29, 56, 29, 1),
+    (39, 4, 43, 29, 0),
     (42, 4, 46, 29, 0),
-    (52, 4, 55, 29, 0),
-    (47, 4, 49, 4, 1),
-    (60, 0, 61, 5, 1),
+    (55, 29, 56, 29, 0),
     (63, 1, 64, 6, 1),
     (41, 4, 45, 29, 0),
-    (48, 4, 50, 4, 1),
     (61, 0, 62, 5, 1),
     (42, 4, 46, 29, 0),
-    (52, 29, 55, 29, 1),
     (62, 0, 63, 5, 1),
     (35, 3, 39, 28, 0),
-    (35, 4, 39, 29, 0),
+    (38, 4, 40, 29, 0),
     (43, 4, 47, 29, 0),
+    (54, 29, 55, 29, 0),
     (35, 30, 36, 3, 1),
     (35, 30, 40, 28, 1),
-    (52, 29, 55, 29, 1),
-    (53, 29, 56, 29, 1),
     (63, 0, 64, 5, 1),
+    (39, 4, 41, 29, 0),
+    (39, 4, 43, 29, 0),
     (44, 4, 48, 29, 0),
-    (52, 4, 55, 29, 0),
+    (55, 29, 56, 29, 0),
     (36, 30, 37, 3, 1),
     (36, 30, 41, 28, 1),
-    (53, 29, 56, 29, 1),
-    (54, 29, 57, 29, 1),
     (40, 4, 44, 29, 0),
-    (36, 0, 41, 30, 1),
+    (53, 4, 56, 29, 0),
+    (50, 1, 51, 6, 1),
     (37, 30, 38, 3, 1),
     (37, 30, 42, 28, 1),
-    (54, 29, 57, 29, 1),
-    (55, 29, 58, 29, 1),
     (41, 4, 45, 29, 0),
-    (52, 4, 55, 29, 0),
-    (37, 0, 42, 30, 1),
+    (54, 4, 57, 29, 0),
+    (54, 29, 55, 29, 0),
+    (51, 1, 52, 6, 1),
     (38, 30, 39, 3, 1),
     (38, 30, 43, 28, 1),
-    (55, 29, 58, 29, 1),
-    (56, 29, 59, 29, 1),
+    (39, 4, 43, 29, 0),
     (42, 4, 46, 29, 0),
-    (38, 0, 43, 30, 1),
+    (53, 4, 56, 29, 0),
+    (55, 4, 58, 29, 0),
+    (55, 29, 56, 29, 0),
+    (52, 1, 53, 6, 1),
     (39, 30, 40, 3, 1),
-    (39, 30, 44, 28, 1),
-    (54, 4, 56, 4, 1),
     (54, 4, 60, 29, 1),
-    (56, 29, 59, 29, 1),
     (40, 4, 44, 29, 0),
     (43, 4, 47, 29, 0),
+    (54, 4, 57, 29, 0),
+    (56, 4, 59, 29, 0),
     (55, 4, 57, 4, 1),
     (55, 4, 61, 29, 1),
     (41, 3, 45, 28, 0),
     (41, 4, 45, 29, 0),
     (44, 4, 48, 29, 0),
     (55, 4, 57, 29, 0),
+    (55, 4, 58, 29, 0),
     (42, 3, 46, 28, 0),
     (42, 4, 46, 29, 0),
+    (56, 4, 59, 29, 0),
     (56, 4, 58, 29, 0),
     (58, 4, 62, 29, 0),
     (43, 3, 47, 28, 0),
     (43, 4, 47, 29, 0),
+    (54, 29, 55, 29, 0),
     (57, 4, 59, 29, 0),
     (59, 4, 63, 29, 0),
+    (38, 4, 40, 29, 0),
     (44, 3, 48, 28, 0),
     (44, 4, 48, 29, 0),
-    (52, 4, 55, 29, 0),
+    (54, 29, 55, 29, 0),
+    (55, 29, 56, 29, 0),
     (60, 4, 64, 29, 0),
 ];
 
 /// Where each DV's checks begin in [`TAIL_CHECKS`], and how many it has.
 static TAIL_SPANS: [(u16, u8); 32] = [
     (0, 4),
-    (4, 4),
-    (8, 3),
-    (11, 1),
-    (12, 0),
-    (12, 2),
-    (14, 0),
-    (14, 3),
-    (17, 0),
-    (17, 2),
+    (4, 5),
+    (9, 2),
+    (11, 2),
+    (13, 0),
+    (13, 2),
+    (15, 0),
+    (15, 4),
     (19, 0),
     (19, 4),
-    (23, 1),
-    (24, 6),
-    (30, 2),
-    (32, 6),
-    (38, 4),
-    (42, 3),
-    (45, 0),
-    (45, 5),
-    (50, 7),
-    (57, 5),
-    (62, 1),
-    (63, 6),
-    (69, 1),
-    (70, 5),
-    (75, 1),
-    (76, 7),
-    (83, 6),
-    (89, 4),
-    (93, 4),
-    (97, 4),
+    (23, 0),
+    (23, 4),
+    (27, 0),
+    (27, 6),
+    (33, 2),
+    (35, 5),
+    (40, 2),
+    (42, 2),
+    (44, 0),
+    (44, 5),
+    (49, 7),
+    (56, 4),
+    (60, 1),
+    (61, 5),
+    (66, 1),
+    (67, 7),
+    (74, 1),
+    (75, 6),
+    (81, 7),
+    (88, 5),
+    (93, 5),
+    (98, 6),
 ];
 
 /// The checks the prefix leaves. `mask` is never zero here.

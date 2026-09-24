@@ -10,7 +10,7 @@
 
 use std::fmt::Write as _;
 
-use crate::emit::{align, all_groups, highest_read, lanes};
+use crate::emit::{align, all_groups, highest_read, lanes, test_const};
 use crate::solve::Plan;
 
 const W: usize = 8;
@@ -54,10 +54,15 @@ fn prefix(w: &Schedule) -> u32 {
                 -shift
             );
         }
-        let _ = writeln!(
-            out,
-            "        let tested = _mm256_and_si256(x, _mm256_set1_epi32(1 << {bit}));"
+        let mask = test_const(
+            g,
+            bit,
+            W,
+            "_mm256_set1_epi32",
+            |l| format!("_mm256_set_epi32({l})"),
+            |b| format!("(1u32 << {b}) as i32"),
         );
+        let _ = writeln!(out, "        let tested = _mm256_and_si256(x, {mask});");
         out.push_str("        let miss = _mm256_cmpeq_epi32(tested, zero);\n");
         // An empty lane is already an `i32`; wrapping it would only add
         // parentheses to the generated source.
