@@ -54,6 +54,27 @@ SHA-NI on the Xeon and the ARMv8 ones on the M4 and the Graviton4, and
 differ in whether they detect. The `sha1dc` shortfall from 100% is therefore
 what detection costs: 19% to 30%, depending on the machine.
 
+## Testing
+
+The filter is generated code, so the tests check what the generator produces
+against the original implementation rather than against itself.
+
+- **Against the original.** The tests check every generated form against the
+  original C implementation, [sha1collisiondetection]: it must give exactly
+  the same answer on a million random message blocks, and next to a block
+  that each disturbance vector survives, with every bit and every group of
+  tied bits flipped in turn. The original tested its own generated code the
+  same way.
+- **Against known collisions.** SHAttered, SHA-mbles and a reduced-round
+  collision must be detected, with and without mitigation.
+- **Against plain SHA-1.** Digests must match the NIST test vectors and the
+  [`sha1`] crate on random input, and the hardware and software backends must
+  agree on any block.
+
+CI runs the tests on x86-64 and AArch64, on Linux, macOS and Windows, and under
+QEMU on big-endian s390x, 32-bit x86 and older x86 CPUs, so that every form of
+the filter and every backend runs somewhere.
+
 ## Features
 
 - `std` *(default)*: Enables run-time CPU feature detection for hardware
@@ -71,6 +92,7 @@ for inclusion in this project by you, as defined in the Apache-2.0 license,
 shall be dual licensed as above, without any additional terms or conditions.
 
 [paper]: https://marc-stevens.nl/research/papers/C13-S.pdf
+[sha1collisiondetection]: https://github.com/cr-marcstevens/sha1collisiondetection
 [`sha1`]: https://crates.io/crates/sha1
 [`sha1-checked`]: https://crates.io/crates/sha1-checked
 [documentation]: https://docs.rs/sha1dc

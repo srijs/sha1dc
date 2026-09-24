@@ -32,13 +32,15 @@
 //! for measuring. `--check` ignores them, so that a shell with one set still
 //! compares against the committed plan.
 //!
-//! Then run the crate tests. `every_form_matches_scalar` and
-//! `every_form_matches_scalar_where_the_tail_runs` compare the forms against
-//! each other, and `matches_c_reference` compares the whole check against the
-//! original C.
+//! It also runs upstream's C check, which `build.rs` compiles in, reads its
+//! rules off it, checks them against it, and writes them to `upstream.rs`,
+//! next to the forms. See [`upstream`].
+//!
+//! Then run the crate tests. The `every_form_matches_upstream*` tests compare
+//! every form against those rules, and `forms_agree_on_arbitrary_words`
+//! compares the forms against each other.
 
 mod avx2;
-mod conditions;
 mod emit;
 mod neon;
 mod scalar;
@@ -46,6 +48,7 @@ mod solve;
 mod sse2;
 mod tail;
 mod ubc;
+mod upstream;
 
 use std::collections::BTreeSet;
 use std::io::{self, Write as _};
@@ -157,9 +160,9 @@ fn generate(tuned: bool) -> io::Result<Vec<(String, String)>> {
         ));
     }
 
-    // Not a form of the check: the published conditions, which the tests
-    // solve to reach the checks behind a chosen DV.
-    files.push(("conditions.rs".to_owned(), rustfmt(&conditions::emit())?));
+    // Not a form of the check: upstream's rules, which the tests compare
+    // every form against.
+    files.push(("upstream.rs".to_owned(), rustfmt(&upstream::emit())?));
 
     Ok(files)
 }

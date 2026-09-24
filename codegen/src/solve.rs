@@ -13,7 +13,7 @@
 //! code. Vector code wants a different shape: many conditions that share one
 //! word gap and one bit pair, over a continuous range of `i`, so that eight
 //! of them fit in one pair of loads. This module picks that basis instead.
-//! It is the same span either way, so `matches_c_reference` still holds.
+//! It is the same span either way, so the check still matches upstream's.
 //!
 //! # What the prefix is spent on
 //!

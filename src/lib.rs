@@ -93,7 +93,7 @@ impl Schedule {
     ///
     /// Written out apart from the round code, so a test that compares against
     /// it cannot share a fault with what it checks.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub(crate) fn expand(m: &[u32; 16]) -> Self {
         let mut w = Self::zeroed();
         for (t, word) in m.iter().enumerate() {

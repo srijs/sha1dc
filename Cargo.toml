@@ -14,6 +14,7 @@ keywords = ["sha1", "hash", "collision", "shattered"]
 categories = ["cryptography", "no-std"]
 exclude = [
     ".github",
+    ".gitmodules",
     "tests/data/shattered-1.pdf",
     "tests/data/shattered-2.pdf",
 ]
@@ -28,3 +29,8 @@ sha1 = "0.11"
 [features]
 default = ["std"]
 std = []
+
+# The generator runs upstream's check a few million times to read its rules
+# off, which takes minutes unoptimised and seconds optimised.
+[profile.dev.package.sha1dc-codegen]
+opt-level = 3

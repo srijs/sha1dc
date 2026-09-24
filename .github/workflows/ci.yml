@@ -34,6 +34,8 @@ jobs:
       SHA1DC_EXPECT_UBC_CHECK: ${{ matrix.ubc_check }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
@@ -48,6 +50,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
