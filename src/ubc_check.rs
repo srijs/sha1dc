@@ -3,16 +3,21 @@
 //!
 //! # What it does
 //!
-//! A SHA-1 collision attack must follow one of 32 known *disturbance vectors*
-//! (DVs). Each DV makes certain bits of the expanded message relate in a fixed
-//! way. [`ubc_check`] tests those relations and returns a mask. A set bit
-//! means that the DV is still possible for this block.
+//! Every SHA-1 collision attack practical with current cryptanalysis is
+//! believed to use one of 32 known *disturbance vectors* (DVs), as selected by
+//! Stevens and Shumow (2017). Each DV makes certain bits of the expanded
+//! message relate in a fixed way. [`ubc_check`] tests those relations and
+//! returns a mask. A set bit means that the DV is still possible for this
+//! block.
 //!
-//! A zero mask rejects all known attacks. About 95% of blocks give one. A
-//! non-zero mask sends the block to the recompression check in
+//! A zero mask rejects all 32 DV attack classes. About 95% of blocks give
+//! one. A non-zero mask sends the block to the recompression check in
 //! [`crate::block`], which is much slower but gives a definite answer.
-//! This check is a filter, not a decision. A false positive costs time. It
-//! cannot cause a wrong result.
+//! This check is a filter, not a decision. A false positive costs time.
+//! Assuming the paper's Conjecture 3 (that an attack following a DV must use
+//! its prescribed local collisions over message steps 35 to 64) a false
+//! negative is impossible: this filter never rejects a block that the
+//! recompression check would flag.
 //!
 //! # Why it looks the way it does
 //!
