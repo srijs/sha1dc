@@ -1,13 +1,28 @@
 //! Emits the checks the prefix does not cover.
 //!
 //! The mask reaching the tail names the DVs still alive, and a flagged block
-//! carries about one of them. So the tail walks those DVs and runs only their
-//! checks, read from a table, rather than asking about every check to find
-//! the few that matter.
+//! carries about one of them. So the tail runs only those DVs' checks, rather
+//! than asking about every check to find the few that matter. It comes in
+//! two shapes, and each target takes the one that measures faster there.
 
 use std::fmt::Write as _;
 
+use crate::emit::dv_expr;
 use crate::solve::{Cond, Plan};
+
+/// How the tail finds the checks of the DVs still alive.
+#[derive(Clone, Copy)]
+pub enum Shape {
+    /// Walks the live DVs and reads each one's checks from a table, stopping
+    /// at the first that fails. Compact; on x86 the guards measured flat on
+    /// a Xeon and up to 3% slower on short messages on Zen 4.
+    Table,
+    /// A block per DV behind that DV's own bit, with its checks written out.
+    /// Any one DV is rarely alive, so each guard predicts well where the
+    /// table walk mispredicts, which pays on ARM. Kept out of line, which
+    /// measured faster, and the DVs the prefix covers deeply share one guard.
+    Guarded,
+}
 
 /// The checks of each DV, in DV order.
 fn by_dv(plan: &Plan) -> Vec<Vec<&Cond>> {
@@ -22,7 +37,7 @@ fn by_dv(plan: &Plan) -> Vec<Vec<&Cond>> {
         .collect()
 }
 
-pub fn emit(plan: &Plan) -> String {
+pub fn emit(plan: &Plan, shape: Shape) -> String {
     let mut checks: Vec<String> = Vec::new();
     let mut spans: Vec<String> = Vec::new();
 
@@ -44,6 +59,10 @@ fn tail(_: &Schedule, mask: u32) -> u32 {
 }
 "#
         .to_owned();
+    }
+
+    if let Shape::Guarded = shape {
+        return guarded(plan);
     }
 
     let mut out = String::new();
@@ -92,4 +111,79 @@ fn tail(w: &Schedule, mask: u32) -> u32 {{
         spans.join(",\n    "),
     );
     out
+}
+
+/// The [`Shape::Guarded`] tail: for each DV with checks left, a block that
+/// runs only when its bit is set, and then runs all of them without a branch.
+fn guarded(plan: &Plan) -> String {
+    let lists = by_dv(plan);
+    // Most often alive first. A DV at prefix rank `r` is alive with
+    // probability `2^-r`, so those two or more ranks above the lowest are at
+    // most a quarter as likely, and go behind one shared guard instead of
+    // costing a guard each on every call.
+    let mut order: Vec<usize> = (0..32).filter(|&d| !lists[d].is_empty()).collect();
+    order.sort_by_key(|&d| (plan.prefix_ranks[d], d));
+    let Some(&first) = order.first() else {
+        unreachable!("the caller emits the empty tail");
+    };
+    let rare_rank = plan.prefix_ranks[first] + 2;
+
+    let mut common = String::new();
+    let mut rare = String::new();
+    let mut rare_mask = 0u32;
+    for d in order {
+        if plan.prefix_ranks[d] >= rare_rank {
+            rare_mask |= 1 << d;
+            rare.push_str(&block(d, &lists[d]));
+        } else {
+            common.push_str(&block(d, &lists[d]));
+        }
+    }
+
+    let mut out = String::from(
+        "\n/// The checks the prefix leaves, a block per DV. `mask` is never zero here.\n\
+         #[cold]\n\
+         #[inline(never)]\n\
+         fn tail(w: &Schedule, mask: u32) -> u32 {\n    let mut out = mask;\n",
+    );
+    out.push_str(&common);
+    if rare_mask != 0 {
+        let _ = write!(
+            out,
+            "    // The DVs the prefix leaves rarely alive, behind one guard.\n    if mask & ({}) != 0 {{\n{rare}    }}\n",
+            dv_expr(rare_mask)
+        );
+    }
+    out.push_str("    out\n}\n");
+    out
+}
+
+/// The block that runs one DV's checks when its bit is set.
+fn block(d: usize, list: &[&Cond]) -> String {
+    // Each term's low bit is set when its check fails; OR them all. A shift
+    // or XOR by zero is left out, as clippy wants.
+    let terms: Vec<String> = list.iter().map(term).collect();
+    let clear = if d == 0 {
+        "!fail".to_owned()
+    } else {
+        format!("!(fail << {d})")
+    };
+    format!(
+        "    if mask & {} != 0 {{\n        let fail = ({}) & 1;\n        out &= {clear};\n    }}\n",
+        dv_expr(1 << d),
+        terms.join(" | "),
+    )
+}
+
+/// One check as an expression whose low bit is set when the check fails.
+fn term(c: &&Cond) -> String {
+    let bit = |i: usize, a: u32| {
+        if a == 0 {
+            format!("w[{i}]")
+        } else {
+            format!("(w[{i}] >> {a})")
+        }
+    };
+    let flip = if c.c == 1 { " ^ 1" } else { "" };
+    format!("({} ^ {}{flip})", bit(c.i, c.a), bit(c.j, c.b))
 }
