@@ -34,7 +34,7 @@
 //! ```
 //!
 //! [sha1collisiondetection]: https://github.com/cr-marcstevens/sha1collisiondetection
-//! [paper]: https://marc-stevens.nl/research/papers/C13-S.pdf
+//! [paper]: https://www.usenix.org/system/files/conference/usenixsecurity17/sec17-stevens.pdf
 
 #[cfg(feature = "std")]
 extern crate std;
@@ -566,9 +566,11 @@ impl Builder {
     /// Default: `true`.
     ///
     /// **Not public API. Exempt from semver.** This is an optimization. It
-    /// rejects most blocks without recompression and cannot change the result.
-    /// Disabling it makes hashing tens of times slower. Tests use it to
-    /// cross-check the filter.
+    /// rejects most blocks without recompression and, under the same
+    /// conjecture the paper's soundness rests on (attacks stay within the
+    /// DV-prescribed local collisions over steps 35 to 64), never rejects a
+    /// block recompression would have flagged. Disabling it cannot detect
+    /// more, only run slower. Tests use it to cross-check the filter.
     #[doc(hidden)]
     pub const fn internal_use_ubc(mut self, use_ubc: bool) -> Self {
         self.ubc_check = use_ubc;

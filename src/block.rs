@@ -11,7 +11,7 @@
 //! runs for about one block in twenty, and usually for one attack rather than
 //! all of them.
 //!
-//! [paper]: https://marc-stevens.nl/research/papers/C13-S.pdf
+//! [paper]: https://www.usenix.org/system/files/conference/usenixsecurity17/sec17-stevens.pdf
 
 use crate::{BLOCK_SIZE, Inner, Schedule, ubc_check::RecompressFrom};
 
