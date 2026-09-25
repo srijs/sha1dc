@@ -5,9 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
+rand = { version = "0.10", default-features = false }
 
 [build-dependencies]
 cc = "1.4.7"
-
-[dev-dependencies]
-rand = { version = "0.10", default-features = false }

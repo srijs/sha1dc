@@ -1,31 +1,21 @@
 //! Reads upstream's rules off its C check, for the tests.
 //!
-//! `upstream/` is a git submodule of sha1collisiondetection, so git pins the
-//! commit and checks its contents. `build.rs` compiles its `lib/ubc_check.c`
-//! into this generator, which is not published, so no C reaches sha1dc or its
-//! users. To move to a newer upstream, check out that commit in the
-//! submodule and run the generator again.
+//! `upstream/` is a pinned git submodule of sha1collisiondetection, whose
+//! `lib/ubc_check.c` `build.rs` compiles into this unpublished generator, so
+//! no C reaches sha1dc. To move upstream, update the submodule and rerun.
 //!
-//! Upstream tested its own generated check the same way the tests here do:
-//! against a plain per-DV list of conditions (`ubc_check_verify.c` in
-//! sha1collisiondetection-tools), over many random schedules. This writes
-//! such a list, but reads it off the C by running it, rather than from the
-//! data the C was generated from:
+//! The rules are read off the C by running it, as a per-DV list like the one
+//! upstream tested against:
 //!
-//! - For each DV, it draws random schedules until upstream has kept the DV
-//!   [`SAMPLES`] times. The bits whose flip rules the DV out, on the first of
-//!   them, are the bits its conditions read.
-//! - Those bits that always agree, or always disagree, across the samples are
-//!   tied. Each tied group becomes rules: bit `u` XOR bit `v` must be `c`.
-//! - It then checks the rules against the C, and writes nothing if they
-//!   differ: on the first sample with each bit flipped, each group flipped
-//!   whole, and each part of each group flipped, and on [`RANDOM`] random
-//!   schedules.
+//! - Per DV, draw schedules until upstream keeps it [`SAMPLES`] times. The
+//!   bits whose flip rules it out on the first are the bits it reads.
+//! - Bits that always agree, or always disagree, are tied: bit `u` XOR bit
+//!   `v` must be `c`.
+//! - Check the rules against the C, flipping each bit, group and part of a
+//!   group of the first sample, and on [`RANDOM`] random schedules.
 //!
-//! It writes them, and upstream's DV table, to `src/ubc_check/upstream.rs`,
-//! next to the forms, and the tests in `src/ubc_check.rs` compare every form
-//! against them. `--check` runs all of this again, so CI fails when the file
-//! is stale.
+//! The rules and upstream's DV table go to `src/ubc_check/upstream.rs`,
+//! which the tests compare every form against.
 
 use std::fmt::Write as _;
 

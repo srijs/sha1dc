@@ -1,21 +1,14 @@
-//! The last block of a message, which the solver scores a prefix on too.
+//! The last block of a message, which a vector prefix is scored on too.
 //!
-//! Every message ends in a block of padding: whatever data is left, a 1 bit,
-//! zeros and the length. Unlike a block of random data, much of it is fixed,
-//! so a condition need not fail half of the time there: it may fail always,
-//! or never, and a prefix that does well on random data can leave many DVs
-//! alive on these blocks. Short messages are mostly such blocks.
+//! A message's last block is its leftover data, a 1 bit, zeros and the
+//! length. Much of it is fixed, so a condition there may fail always or
+//! never, and a prefix good on random data can leave many DVs alive.
 //!
-//! The chance that a DV survives the prefix on them is worked out exactly
-//! rather than sampled. For a message of length `n`, the last block is fixed
-//! but for its `n mod 64` leftover data bytes and the length's high bits,
-//! and every condition is linear over the bits that are free. So are the
-//! conditions of one DV, which are sums of its published ones. A sum that
-//! the free bits do not reach is decided by the fixed ones alone: the DV
-//! survives only if every such sum comes out as the published conditions
-//! require, and then with probability `2^-r`, where `r` is the rank of the
-//! rest. All of it happens in the space of the DV's own published
-//! conditions, at most 15 of them, so that each is a bit in a `u16`.
+//! The chance a DV survives is worked out exactly, per length mod 64. Its
+//! conditions are sums of its published ones, linear over the free bits. A
+//! sum the free bits do not reach is fixed: the DV survives only if all such
+//! sums come out right, and then with `2^-r` for the rank `r` of the rest.
+//! A DV has at most 15 published conditions, so a sum fits in a `u16`.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -114,6 +107,8 @@ fn shape(r: usize) -> (Form, Form) {
 #[derive(Clone, PartialEq, Eq)]
 struct Sub {
     rows: [u16; 16],
+    /// The positions that have a row.
+    pivots: u16,
     rank: u32,
 }
 
@@ -121,6 +116,7 @@ impl Sub {
     fn new() -> Self {
         Self {
             rows: [0; 16],
+            pivots: 0,
             rank: 0,
         }
     }
@@ -131,12 +127,13 @@ impl Sub {
     }
 
     /// `v` with every pivot cleared, which is the same for all of `v` modulo
-    /// the subspace.
+    /// the subspace. No row has another's pivot, so each pivot `v` has is
+    /// cleared by its own row alone, in any order.
     fn reduce(&self, mut v: u16) -> u16 {
-        for p in (0..16).rev() {
-            if v >> p & 1 == 1 && self.rows[p] != 0 {
-                v ^= self.rows[p];
-            }
+        let mut at = v & self.pivots;
+        while at != 0 {
+            v ^= self.rows[at.trailing_zeros() as usize];
+            at &= at - 1;
         }
         v
     }
@@ -155,6 +152,7 @@ impl Sub {
             }
         }
         self.rows[p] = v;
+        self.pivots |= 1 << p;
         self.rank += 1;
         true
     }
@@ -290,17 +288,85 @@ pub struct Seen {
 /// Each DV's chance to survive on each residue.
 pub type Alive = [f64; RESIDUES];
 
-/// Where the last blocks stand after a prefix: per DV, what it has reached,
-/// and its chance to survive on each residue. Per residue it also keeps what
-/// the tail needs, so that a trial that changes a few DVs costs only those.
+/// Where the last blocks stand after a prefix, per DV and per residue, with
+/// totals so that a trial costs only the DVs it changes.
 pub struct Last {
     pub seen: Vec<Seen>,
     alive: [Alive; 32],
-    /// Per residue: the product of `1 - alive` over the DVs where it is not
-    /// zero, how many DVs make it zero, and the sum of `alive`.
+    totals: Totals,
+}
+
+/// Per residue: the product of `1 - alive` over the DVs where it is not
+/// zero, how many DVs make it zero, and the sum of `alive`.
+#[derive(Clone)]
+pub struct Totals {
     none: [f64; RESIDUES],
     certain: [u32; RESIDUES],
     sum: [f64; RESIDUES],
+}
+
+impl Totals {
+    fn of(alive: &[Alive; 32]) -> Self {
+        let mut this = Totals {
+            none: [1.0; RESIDUES],
+            certain: [0; RESIDUES],
+            sum: [0.0; RESIDUES],
+        };
+        for r in 0..RESIDUES {
+            let (mut none, mut certain, mut sum) = (1.0, 0, 0.0);
+            for row in alive {
+                if row[r] == 1.0 {
+                    certain += 1;
+                } else {
+                    none *= 1.0 - row[r];
+                }
+                sum += row[r];
+            }
+            (this.none[r], this.certain[r], this.sum[r]) = (none, certain, sum);
+        }
+        this
+    }
+
+    /// Replaces one residue's chance `old` of some DV by `new`.
+    fn step((none, certain, sum): (&mut f64, &mut u32, &mut f64), old: f64, new: f64) {
+        if old == 1.0 {
+            *certain -= 1;
+        } else {
+            *none /= 1.0 - old;
+        }
+        if new == 1.0 {
+            *certain += 1;
+        } else {
+            *none *= 1.0 - new;
+        }
+        *sum += new - old;
+    }
+
+    /// Replaces a DV's chances `old` by `new`.
+    pub fn swap(&mut self, old: &Alive, new: &Alive) {
+        for r in 0..RESIDUES {
+            let at = (&mut self.none[r], &mut self.certain[r], &mut self.sum[r]);
+            Self::step(at, old[r], new[r]);
+        }
+    }
+
+    /// [`Last::tail`], with each DV's chances in `changed` swapped from the
+    /// first of its pair to the second.
+    pub fn tail<'a>(
+        &self,
+        changed: impl Iterator<Item = (&'a Alive, &'a Alive)> + Clone,
+    ) -> (f64, f64) {
+        let (mut enters, mut dvs) = (0.0, 0.0);
+        for r in 0..RESIDUES {
+            let (mut none, mut certain, mut sum) = (self.none[r], self.certain[r], self.sum[r]);
+            for (old, new) in changed.clone() {
+                Self::step((&mut none, &mut certain, &mut sum), old[r], new[r]);
+            }
+            enters += if certain > 0 { 1.0 } else { 1.0 - none };
+            dvs += sum;
+        }
+        (enters / RESIDUES as f64, dvs / RESIDUES as f64)
+    }
 }
 
 impl Last {
@@ -312,46 +378,34 @@ impl Last {
 
     /// Works the residues' totals out again from every DV.
     pub fn total(&mut self) {
-        for r in 0..RESIDUES {
-            let (mut none, mut certain, mut sum) = (1.0, 0, 0.0);
-            for row in &self.alive {
-                if row[r] == 1.0 {
-                    certain += 1;
-                } else {
-                    none *= 1.0 - row[r];
-                }
-                sum += row[r];
-            }
-            (self.none[r], self.certain[r], self.sum[r]) = (none, certain, sum);
-        }
+        self.totals = Totals::of(&self.alive);
+    }
+
+    /// The residues' totals.
+    pub fn totals(&self) -> &Totals {
+        &self.totals
+    }
+
+    /// DV `d`'s chance to survive on each residue.
+    pub fn alive(&self, d: usize) -> &Alive {
+        &self.alive[d]
+    }
+
+    /// Each DV's chance to survive a last block, over the residues.
+    pub fn means(&self) -> [f64; 32] {
+        std::array::from_fn(|d| mean(&self.alive[d]))
     }
 
     /// How often a last block enters the tail, taking the DVs to survive
-    /// independently as for random data, and how many DVs it carries in, if
-    /// the DVs in `changed` had those chances instead.
-    pub fn tail(&self, changed: &[(usize, &Alive)]) -> (f64, f64) {
-        let (mut enters, mut dvs) = (0.0, 0.0);
-        for r in 0..RESIDUES {
-            let (mut none, mut certain, mut sum) = (self.none[r], self.certain[r], self.sum[r]);
-            for &(d, row) in changed {
-                let (old, new) = (self.alive[d][r], row[r]);
-                if old == 1.0 {
-                    certain -= 1;
-                } else {
-                    none /= 1.0 - old;
-                }
-                if new == 1.0 {
-                    certain += 1;
-                } else {
-                    none *= 1.0 - new;
-                }
-                sum += new - old;
-            }
-            enters += if certain > 0 { 1.0 } else { 1.0 - none };
-            dvs += sum;
-        }
-        (enters / RESIDUES as f64, dvs / RESIDUES as f64)
+    /// independently as for random data, and how many DVs it carries in.
+    pub fn tail(&self) -> (f64, f64) {
+        self.totals.tail(std::iter::empty())
     }
+}
+
+/// A DV's chance to survive a last block, over the residues.
+pub fn mean(alive: &Alive) -> f64 {
+    alive.iter().sum::<f64>() / RESIDUES as f64
 }
 
 /// The published conditions of every DV, and what each residue does to them.
@@ -396,9 +450,11 @@ impl Exact {
                 })
                 .collect(),
             alive: [[1.0; RESIDUES]; 32],
-            none: [1.0; RESIDUES],
-            certain: [32; RESIDUES],
-            sum: [32.0; RESIDUES],
+            totals: Totals {
+                none: [1.0; RESIDUES],
+                certain: [32; RESIDUES],
+                sum: [32.0; RESIDUES],
+            },
         }
     }
 
@@ -413,10 +469,7 @@ impl Exact {
         seen
     }
 
-    /// DV `d`'s chance to survive on each residue once `c` is checked too,
-    /// from where `seen` has it, and where the prefix then reaches rank
-    /// `rank` for it. The same as [`Exact::alive`] after [`Exact::seen_after`],
-    /// without a copy.
+    /// [`Exact::alive`] after [`Exact::seen_after`], without a copy.
     pub fn alive_after(&self, seen: &Seen, d: usize, c: &Cond, rank: u32) -> Alive {
         let v = self.sum(c, d);
         // A class for each residue at most, so the ranks fit on the stack.
@@ -477,20 +530,29 @@ fn last_of(conds: impl Iterator<Item = Cond>) -> Last {
 /// How often the last blocks enter the tail after `plan`'s prefix, and how
 /// many DVs they carry in, for the report.
 pub fn tail_of(plan: &Plan) -> (f64, f64) {
-    last_of(plan.families.iter().flat_map(|f| f.conds())).tail(&[])
+    last_of(plan.families.iter().flat_map(|f| f.conds())).tail()
+}
+
+/// The message lengths, mod 64, whose every last block `plan`'s prefix
+/// sends into the tail.
+pub fn cliffs(plan: &Plan) -> Vec<usize> {
+    let last = last_of(plan.families.iter().flat_map(|f| f.conds()));
+    (0..RESIDUES)
+        .filter(|&r| last.totals.certain[r] > 0)
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use rand::rngs::SmallRng;
+    use rand::rngs::Xoshiro256PlusPlus;
     use rand::{RngExt as _, SeedableRng as _};
 
     use super::*;
-    use crate::solve::{Shape, solve};
+    use crate::solve::{Ops, Params, search};
 
     /// The last block of a message of length `r` mod 64, drawn at random:
     /// its data bytes, and its length under 8 KiB.
-    fn block(rng: &mut SmallRng, r: usize) -> [u32; 80] {
+    fn block(rng: &mut Xoshiro256PlusPlus, r: usize) -> [u32; 80] {
         let mut bytes = [0u8; 64];
         if r < 56 {
             rng.fill(&mut bytes[..r]);
@@ -514,13 +576,21 @@ mod tests {
     #[test]
     fn exact_chances_match_counting() {
         const DRAWS: usize = 4000;
-        let conds: Vec<Cond> = solve(4, 20, Shape::LaneMask)
-            .families
-            .iter()
-            .flat_map(|f| f.conds())
-            .collect();
+        let ops = Ops { lane_bit: true };
+        let conds: Vec<Cond> = search(
+            &Params {
+                width: 4,
+                groups: 20,
+                ops,
+            },
+            0,
+        )
+        .families
+        .iter()
+        .flat_map(|f| f.conds())
+        .collect();
         let last = last_of(conds.iter().copied());
-        let mut rng = SmallRng::seed_from_u64(0x0123_4567_89ab_cdef);
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x0123_4567_89ab_cdef);
         for r in 0..RESIDUES {
             let mut survived = [0usize; 32];
             for _ in 0..DRAWS {

@@ -1,12 +1,8 @@
 //! Emits the SSE2 form, used on both `x86` and `x86_64`.
 //!
-//! This has the same structure as the NEON form: four checks per vector and
-//! two accumulators. SSE2 has no `vtst`, so it compares the masked bit against
-//! zero and uses `andnot` to keep the lanes where the bit was *set*.
-//!
-//! A `cfg` on `target_feature = "sse2"` selects this form. The feature is on
-//! for `x86_64` and for rustc `i686`, and off for `i586`, which uses the
-//! scalar form.
+//! Like the NEON form, but SSE2 has no `vtst`: it compares the masked bit with
+//! zero and keeps the lanes where it was *set* with `andnot`. `i586`, without
+//! SSE2, uses the scalar form.
 
 use std::fmt::Write as _;
 
@@ -39,7 +35,7 @@ fn prefix(w: &Schedule) -> u32 {
         out.push_str("\n    {\n");
         let _ = writeln!(out, "        let near = load::<{base}>(w);");
         let _ = writeln!(out, "        let far = load::<{}>(w);", base + f.offset);
-        let (shift, bit) = align(f);
+        let shift = align(f);
         if shift == 0 {
             out.push_str("        let x = _mm_xor_si128(near, far);\n");
         } else if shift > 0 {
@@ -56,7 +52,6 @@ fn prefix(w: &Schedule) -> u32 {
         }
         let mask = test_const(
             g,
-            bit,
             W,
             "_mm_set1_epi32",
             |l| format!("_mm_set_epi32({l})"),

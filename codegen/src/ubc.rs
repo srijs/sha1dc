@@ -1,17 +1,9 @@
 //! The unavoidable bitconditions, as published.
 //!
-//! This is the input to [`crate::solve`] and the source of truth for the
-//! whole check. Each entry says: bit `a` of `w[i]` XOR bit `b` of `w[j]`
-//! must equal `c`; if it does not, the DVs in `dvs` are ruled out.
-//!
-//! These are Table 4 and Table 5 of the paper, all 156 of them with the same
-//! DV sets. They were read out of `lib/ubc_check.c` of sha1collisiondetection
-//! because that form is machine readable, and then checked against the
-//! published tables.
-//!
-//! The solver does not use these conditions directly. Per DV they span a
-//! linear space, and any set with the same span gives the same mask, so the
-//! solver picks a different set that suits vector code. See [`crate::solve`].
+//! The source of truth for the check: bit `a` of `w[i]` XOR bit `b` of
+//! `w[j]` must equal `c`, or the DVs in `dvs` are ruled out. Tables 4 and 5
+//! of the paper, read out of upstream's `lib/ubc_check.c` and checked
+//! against them. [`crate::solve`] picks another basis of the same span.
 
 /// The DV names, in bit order.
 pub const DV_NAMES: [&str; 32] = [

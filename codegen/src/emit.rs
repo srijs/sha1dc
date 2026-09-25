@@ -1,26 +1,15 @@
 //! Shared helpers for the emitters.
 //!
-//! [`crate::solve`] decides which checks run in the prefix and how they group.
-//! Everything here is about turning that decision into source: lining up the
-//! two bits, cutting a family into vector-sized pieces, and ordering the
-//! pieces.
+//! Turning [`crate::solve`]'s plan into source: lining up the two bits,
+//! cutting families into vector groups, and ordering them.
 
-use crate::solve::{Family, Plan};
+use crate::solve::{Family, Plan, SCHEDULE, windows};
 use crate::ubc::DV_NAMES;
 
-/// Words in the expanded message schedule. Every emitted form takes
-/// `&[u32; SCHEDULE]`, and a read past it is out of bounds.
-const SCHEDULE: usize = 80;
-
-/// How the two words are lined up so that one bit test covers both. Returns
-/// the shift to apply and the bit to test. A positive shift moves `far` down,
-/// a negative shift moves `near` down.
-pub fn align(f: &Family) -> (i32, u32) {
-    if f.far_bit >= f.near_bit {
-        ((f.far_bit - f.near_bit) as i32, f.near_bit)
-    } else {
-        (-((f.near_bit - f.far_bit) as i32), f.far_bit)
-    }
+/// The shift that lines the two words up so that one bit test covers both.
+/// A positive shift moves `far` down, a negative shift moves `near` down.
+pub fn align(f: &Family) -> i32 {
+    f.far_bit as i32 - f.near_bit as i32
 }
 
 /// The bit a member with near bit `a` is tested at, once [`align`] has lined
@@ -29,26 +18,21 @@ pub fn test_bit(shift: i32, a: u32) -> u32 {
     (a as i32 + shift.min(0)) as u32
 }
 
-/// Whether every lane of `g` that checks anything tests `bit`, so that one
-/// broadcast constant serves the whole group.
-fn uniform(g: &Group, bit: u32) -> bool {
-    g.iter().filter_map(|m| m.2).all(|b| b == bit)
-}
-
 /// The constant a group's lanes are tested against, as source: a broadcast
-/// of `1 << bit` where every lane that checks anything tests `bit`, and
-/// otherwise `per_lane` of each lane's own, `one(bit)` where the lane tests
-/// `bit` and 0 where it tests nothing.
+/// of `1 << bit` where every lane that checks anything tests the same `bit`,
+/// and otherwise `per_lane` of each lane's own, `one(bit)` where the lane
+/// tests `bit` and 0 where it tests nothing.
 pub fn test_const(
     g: &Group,
-    bit: u32,
     width: usize,
     broadcast: &str,
     per_lane: impl Fn(&str) -> String,
     one: impl Fn(u32) -> String,
 ) -> String {
-    if uniform(g, bit) {
-        format!("{broadcast}(1 << {bit})")
+    let mut bits = g.iter().filter_map(|m| m.2);
+    let first = bits.next().unwrap_or(0);
+    if bits.all(|b| b == first) {
+        format!("{broadcast}(1 << {first})")
     } else {
         let masks: Vec<String> = g
             .iter()
@@ -71,30 +55,9 @@ pub fn dv_expr(dvs: u32) -> String {
 /// the bit tested)` per lane. A lane with no member tests nothing.
 pub type Group = Vec<(usize, String, Option<u32>)>;
 
-/// Where the groups of a family go: the start of each window and how many
-/// of the members `is` it takes, in order.
-///
-/// One pair of loads covers `width` consecutive `i`, so a window takes every
-/// member that falls in it. A lane the family has no member for takes no DV
-/// bits and clears nothing, which is what the group would have cost anyway
-/// had the window been shorter. A window starts at its first member, or
-/// earlier where that would take its far load past the end of the schedule.
-/// The solver counts its budget with this same walk.
-pub fn windows(is: &[usize], width: usize, offset: usize) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
-    let mut rest = is;
-    while let Some(&first) = rest.first() {
-        let base = first.min(SCHEDULE - width - offset);
-        let n = rest.iter().take_while(|&&i| i < base + width).count();
-        out.push((base, n));
-        rest = &rest[n..];
-    }
-    out
-}
-
 /// Only a continuous range can share one vector load.
 pub fn lane_groups(f: &Family, width: usize) -> Vec<Group> {
-    let (shift, _) = align(f);
+    let shift = align(f);
     let is: Vec<usize> = f.members.iter().map(|m| m.0).collect();
     let mut out = Vec::new();
     let mut rest = f.members.as_slice();
@@ -133,11 +96,8 @@ pub fn all_groups(plan: &Plan, width: usize) -> Vec<(&Family, Group)> {
     groups
 }
 
-/// The highest `w` index any group reads, for the module comment.
-///
-/// `Schedule::window` proves each emitted load's bound at compile time, so
-/// this is the second line of defence rather than the only one. It fails
-/// here, naming the table, rather than inside a generated `const` block.
+/// The highest `w` index any group reads. `Schedule::window` also proves
+/// each load's bound, but this fails here, naming the table.
 pub fn highest_read(plan: &Plan, width: usize) -> usize {
     let high = all_groups(plan, width)
         .iter()
@@ -186,15 +146,10 @@ pub fn module(name: &str, prefix: &str, tail: &str) -> String {
 }
 "#;
 
-    // `#[target_feature]` on a safe function makes the body safe code: the
-    // intrinsics need no `unsafe`, and a caller that cannot prove the feature
-    // still has to write one. The loads go through `crate::mem`.
-    //
-    // `#[inline]` here, on `prefix` and on `tail` makes the whole check
-    // available to the block loop in every codegen unit. Without it, whether
-    // it is inlined depends on how the crate happens to be partitioned, and it
-    // runs once per block. `#[inline(always)]` is not allowed alongside
-    // `#[target_feature]`.
+    // `#[target_feature]` on a safe function keeps the body safe; callers
+    // still need `unsafe`. `#[inline]` here and on `prefix` and `tail` lets
+    // the block loop inline the check in every codegen unit;
+    // `#[inline(always)]` is not allowed with `#[target_feature]`.
     let check = match feature {
         None => format!(
             "/// Runs the whole check.\n#[inline(always)]\npub(super) fn check(w: &Schedule) -> u32 {{\n{BODY}"
@@ -221,11 +176,8 @@ pub fn module(name: &str, prefix: &str, tail: &str) -> String {
     )
 }
 
-/// The arch import and the loads, for one target.
-///
-/// Every load a generated body does goes through `load`, which takes its
-/// window from `Schedule::window` and hands it to `crate::mem`. Neither
-/// here nor in the hundreds of lines that follow is there any `unsafe`.
+/// The arch import and the loads, for one target. Every load goes through
+/// `load` and `crate::mem`, so the forms need no `unsafe`.
 fn preamble(name: &str) -> String {
     match name {
         "scalar" => String::new(),
@@ -264,11 +216,8 @@ fn splat(bits: [u32; 4]) -> uint32x4_t {
 }
 "#;
 
-/// The one load a generated body uses.
-///
-/// `I` is a const parameter, so `Schedule::window` proves the bound at
-/// compile time at the call site, and it holds for every plan this generator
-/// can emit rather than only the one committed.
+/// The one load a generated body uses. `I` is a const parameter, so the
+/// bound is proved at compile time for any plan.
 fn load(feature: &str, width: usize, ty: &str, helper: &str) -> String {
     format!(
         r#"

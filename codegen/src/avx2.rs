@@ -1,12 +1,7 @@
 //! Emits the AVX2 form, used on `x86` and `x86_64` where the CPU has it.
 //!
-//! The same structure as the SSE2 form with twice the lanes: eight checks per
-//! vector instead of four. AVX2 has no `vtst` either, so it compares the masked
-//! bit against zero and uses `andnot` to keep the lanes where the bit was set.
-//!
-//! AVX2 is not baseline on any target, so unlike the other vector forms the
-//! caller detects it at run time. The final fold drops to 128 bits first,
-//! because that is where the horizontal shuffles are.
+//! The SSE2 form with eight lanes. AVX2 is detected at run time, and the final
+//! fold drops to 128 bits, where the horizontal shuffles are.
 
 use std::fmt::Write as _;
 
@@ -35,7 +30,7 @@ fn prefix(w: &Schedule) -> u32 {
         let base = g[0].0;
         let acc = format!("acc{}", n % 2);
         let bits: Vec<&str> = g.iter().map(|m| m.1.as_str()).collect();
-        let (shift, bit) = align(f);
+        let shift = align(f);
 
         out.push_str("\n    {\n");
         let _ = writeln!(out, "        let near = load::<{base}>(w);");
@@ -56,7 +51,6 @@ fn prefix(w: &Schedule) -> u32 {
         }
         let mask = test_const(
             g,
-            bit,
             W,
             "_mm256_set1_epi32",
             |l| format!("_mm256_set_epi32({l})"),
