@@ -42,6 +42,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
 use solve::{Ops, Params, Plan};
+use tail::Shape;
 
 /// What each target's plan is searched for. A group runs on every block, so
 /// the budget trades unconditional work against the tail. Each was measured
@@ -55,6 +56,7 @@ const TARGETS: &[Target] = &[
             groups: 70,
             ops: NONE,
         },
+        tail: Shape::Table,
     },
     Target {
         name: "neon",
@@ -63,6 +65,7 @@ const TARGETS: &[Target] = &[
             groups: 20,
             ops: LANE_BIT,
         },
+        tail: Shape::Guarded,
     },
     Target {
         name: "sse2",
@@ -71,6 +74,7 @@ const TARGETS: &[Target] = &[
             groups: 26,
             ops: LANE_BIT,
         },
+        tail: Shape::Table,
     },
     Target {
         name: "avx2",
@@ -79,6 +83,7 @@ const TARGETS: &[Target] = &[
             groups: 14,
             ops: LANE_BIT,
         },
+        tail: Shape::Table,
     },
 ];
 
@@ -91,6 +96,7 @@ const LANE_BIT: Ops = Ops { lane_bit: true };
 struct Target {
     name: &'static str,
     params: Params,
+    tail: Shape,
 }
 
 /// Where the generated files live when no directory is given.
@@ -158,7 +164,7 @@ fn generate() -> io::Result<Vec<(String, String)>> {
     // every form against. Read off while the targets search.
     let (forms, upstream) = std::thread::scope(|scope| {
         let upstream = scope.spawn(|| rustfmt(&upstream::emit()));
-        let forms = per_target(|target| rustfmt(&form(target.name, &plan(target)?)));
+        let forms = per_target(|target| rustfmt(&form(target.name, &plan(target)?, target.tail)));
         (forms, upstream.join().expect("upstream's thread panicked"))
     });
     let mut files = TARGETS
@@ -172,7 +178,7 @@ fn generate() -> io::Result<Vec<(String, String)>> {
 }
 
 /// One form of the check, before formatting.
-fn form(name: &str, plan: &Plan) -> String {
+fn form(name: &str, plan: &Plan, tail: Shape) -> String {
     let prefix = match name {
         "scalar" => scalar::emit(plan),
         "neon" => neon::emit(plan),
@@ -180,7 +186,7 @@ fn form(name: &str, plan: &Plan) -> String {
         "avx2" => avx2::emit(plan),
         other => panic!("no emitter for {other}"),
     };
-    emit::module(name, &prefix, &tail::emit(plan))
+    emit::module(name, &prefix, &tail::emit(plan, tail))
 }
 
 fn write(dir: &Path) -> io::Result<()> {
@@ -354,7 +360,7 @@ mod tests {
                     },
                     0,
                 );
-                rustfmt(&form(target.name, &plan))
+                rustfmt(&form(target.name, &plan, target.tail))
                     .unwrap_or_else(|e| panic!("{} at {groups} groups: {e}", target.name));
             }
         }
