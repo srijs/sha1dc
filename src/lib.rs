@@ -34,7 +34,7 @@
 //! ```
 //!
 //! [sha1collisiondetection]: https://github.com/cr-marcstevens/sha1collisiondetection
-//! [paper]: https://marc-stevens.nl/research/papers/C13-S.pdf
+//! [paper]: https://www.usenix.org/system/files/conference/usenixsecurity17/sec17-stevens.pdf
 
 #[cfg(feature = "std")]
 extern crate std;

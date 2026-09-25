@@ -41,7 +41,7 @@
 //! belongs to.
 //!
 //! [FIPS 180-1]: https://csrc.nist.gov/pubs/fips/180-1/final
-//! [paper]: https://marc-stevens.nl/research/papers/C13-S.pdf
+//! [paper]: https://www.usenix.org/system/files/conference/usenixsecurity17/sec17-stevens.pdf
 
 use crate::Schedule;
 use crate::ubc_check::RecompressFrom;

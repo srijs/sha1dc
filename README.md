@@ -10,7 +10,8 @@ compatibility, such as in `git`'s object identifiers.
 
 This security issue can be mitigated by detecting those manufactured collisions.
 This crate follows the method of Marc Stevens and Dan Shumow, which finds the
-message blocks that a collision attack produces and reports them ([paper]).
+message blocks that a collision attack produces and reports them
+([usenix17-paper], [crypto13-paper]).
 
 To implement filtering for known disturbance vectors, it follows a code
 generation approach. Each condition for an attack is a linear equation over two
@@ -91,7 +92,8 @@ Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in this project by you, as defined in the Apache-2.0 license,
 shall be dual licensed as above, without any additional terms or conditions.
 
-[paper]: https://marc-stevens.nl/research/papers/C13-S.pdf
+[usenix17-paper]: https://www.usenix.org/system/files/conference/usenixsecurity17/sec17-stevens.pdf
+[crypto13-paper]: https://marc-stevens.nl/research/papers/C13-S.pdf
 [sha1collisiondetection]: https://github.com/cr-marcstevens/sha1collisiondetection
 [`sha1`]: https://crates.io/crates/sha1
 [`sha1-checked`]: https://crates.io/crates/sha1-checked
