@@ -1,10 +1,7 @@
 //! Emits the scalar form. The vector forms must match it.
 //!
-//! One statement per check, directly from the table. It runs on a target that
-//! has neither instruction set, and `forms_agree_on_arbitrary_words`
-//! compares the vector forms against it. This form is generated and not
-//! hand-written, because that comparison only has a meaning if all three
-//! forms come from one table.
+//! One statement per check, for targets without a vector form. Generated
+//! from the same table, so comparing the forms against it means something.
 
 use std::fmt::Write as _;
 
@@ -25,7 +22,7 @@ fn prefix(w: &Schedule) -> u32 {
 
     for f in &plan.families {
         out.push('\n');
-        let (shift, _) = align(f);
+        let shift = align(f);
         for &(i, a, dvs) in &f.members {
             let bit = test_bit(shift, a);
             let (near, far) = (i, i + f.offset);

@@ -1,20 +1,12 @@
 //! Emits the `aarch64` form.
 //!
-//! Four checks per vector. Load `w[i..i + 4]` and `w[i + offset..]`, align the
-//! two bits, then test them. `vtstq_u32` sets a lane to all ones if the tested
-//! bit is set. This replaces the shift, and, and negate of the scalar form
-//! with one instruction. The DV bits of the lane are then masked in and added
-//! to an accumulator.
+//! Four checks per vector: load `w[i..i + 4]` and `w[i + offset..]`, align
+//! the two bits, and `vtstq_u32` them into lanes of all ones or zero.
 //!
-//! The mask is applied with `vminq_u32`, or `vqsubq_u32` where a clear bit is
-//! what rules the DVs out, not with `vandq_u32` or `vbicq_u32`. Each lane of
-//! the test is zero or all ones, so both give the DV bits or zero. LLVM
-//! rewrites a `vtstq_u32` whose result meets an AND into `and`, `cmeq` and
-//! `bic`, one instruction more per group and seventeen a block; it leaves
-//! these two alone.
-//!
-//! There are two accumulators, so the final OR chain does not serialize the
-//! groups. The target settles `neon`, so a `cfg` selects this form.
+//! The DV bits are masked in with `vminq_u32`, or `vqsubq_u32` where a clear
+//! bit rules them out, not `vandq_u32`: LLVM turns a `vtstq_u32` met by an
+//! AND into `and`, `cmeq` and `bic`, an instruction more per group. Two
+//! accumulators keep the final OR chain short.
 
 use std::fmt::Write as _;
 
@@ -46,7 +38,7 @@ fn prefix(w: &Schedule) -> u32 {
         out.push_str("\n    {\n");
         let _ = writeln!(out, "        let near = load::<{base}>(w);");
         let _ = writeln!(out, "        let far = load::<{}>(w);", base + f.offset);
-        let (shift, bit) = align(f);
+        let shift = align(f);
         // `vshrq_n_u32` rejects a zero shift, and no shift is needed when the
         // bits are already aligned.
         if shift == 0 {
@@ -66,7 +58,6 @@ fn prefix(w: &Schedule) -> u32 {
         // With a bit per lane, the mask goes through memory like the DV bits.
         let mask = test_const(
             g,
-            bit,
             W,
             "vdupq_n_u32",
             |l| format!("splat([{l}])"),
