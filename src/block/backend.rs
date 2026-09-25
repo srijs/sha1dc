@@ -11,7 +11,9 @@ use crate::block::rounds;
 use crate::ubc_check::RecompressFrom;
 use crate::{BLOCK_SIZE, Schedule};
 
-#[cfg(target_arch = "aarch64")]
+// Only where NEON is: a softfloat target such as `aarch64-unknown-none-softfloat`
+// cannot enable it per function, so it takes the scalar backend.
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 mod armv8;
 mod scalar;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -23,7 +25,11 @@ mod sha_ni;
 /// a system call, so a `no_std` build uses `target_feature` only. Such a build
 /// needs the features on the command line, for example
 /// `-C target-feature=+sha2`.
-#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(any(
+    target_arch = "x86",
+    target_arch = "x86_64",
+    all(target_arch = "aarch64", target_feature = "neon")
+))]
 fn has_sha1_instructions() -> bool {
     #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
     {
@@ -32,7 +38,7 @@ fn has_sha1_instructions() -> bool {
             && std::arch::is_x86_feature_detected!("ssse3")
             && std::arch::is_x86_feature_detected!("sse4.1")
     }
-    #[cfg(all(feature = "std", target_arch = "aarch64"))]
+    #[cfg(all(feature = "std", target_arch = "aarch64", target_feature = "neon"))]
     {
         std::arch::is_aarch64_feature_detected!("sha2")
     }
@@ -45,7 +51,7 @@ fn has_sha1_instructions() -> bool {
             target_feature = "sse4.1"
         ))
     }
-    #[cfg(all(not(feature = "std"), target_arch = "aarch64"))]
+    #[cfg(all(not(feature = "std"), target_arch = "aarch64", target_feature = "neon"))]
     {
         cfg!(target_feature = "sha2")
     }
@@ -55,7 +61,7 @@ fn has_sha1_instructions() -> bool {
 enum Repr {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     ShaNi,
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
     Armv8,
     Scalar,
 }
@@ -67,11 +73,15 @@ pub(crate) struct Backend(Repr);
 
 impl Backend {
     pub(crate) fn new() -> Self {
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
+        #[cfg(any(
+            target_arch = "x86",
+            target_arch = "x86_64",
+            all(target_arch = "aarch64", target_feature = "neon")
+        ))]
         if has_sha1_instructions() {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
             return Self(Repr::ShaNi);
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             return Self(Repr::Armv8);
         }
 
@@ -104,7 +114,7 @@ impl Backend {
                 // SAFETY: `Repr::ShaNi` means the features were checked.
                 unsafe { sha_ni::compress_spill(state, block, m1, state_58, state_65) };
             }
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             Repr::Armv8 => {
                 // SAFETY: `Repr::Armv8` means the features were checked.
                 unsafe { armv8::compress_spill(state, block, m1, state_58, state_65) };
@@ -150,7 +160,7 @@ impl Backend {
                 }
                 rounds::states_from_60_64(m1, need_58, state_58, state_65);
             }
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             Repr::Armv8 => rounds::states_from_60_64(m1, need_58, state_58, state_65),
         }
     }
@@ -178,7 +188,7 @@ impl Backend {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
             // SAFETY: `Repr::ShaNi` is chosen only where the instructions are.
             Repr::ShaNi => unsafe { sha_ni::recompress(step, m1, dm, state, chaining_out) },
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             // SAFETY: `Repr::Armv8` is chosen only where the instructions are.
             Repr::Armv8 => unsafe { armv8::recompress(step, m1, dm, state, chaining_out) },
             Repr::Scalar => {
@@ -206,7 +216,7 @@ mod tests {
         match backend.0 {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
             Repr::ShaNi => true,
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             Repr::Armv8 => true,
             Repr::Scalar => false,
         }
@@ -217,7 +227,7 @@ mod tests {
         match backend.0 {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
             Repr::ShaNi => "sha-ni",
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             Repr::Armv8 => "armv8",
             Repr::Scalar => "scalar",
         }
@@ -247,7 +257,11 @@ mod tests {
     #[test]
     fn hardware_is_used_when_the_target_guarantees_it() {
         let guaranteed = cfg!(any(
-            all(target_arch = "aarch64", target_feature = "sha2"),
+            all(
+                target_arch = "aarch64",
+                target_feature = "neon",
+                target_feature = "sha2"
+            ),
             all(
                 any(target_arch = "x86", target_arch = "x86_64"),
                 target_feature = "sha",

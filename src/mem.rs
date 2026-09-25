@@ -58,7 +58,7 @@ mod imp {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 mod imp {
     use core::arch::aarch64::*;
 
@@ -89,7 +89,11 @@ mod imp {
     }
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(any(
+    target_arch = "x86",
+    target_arch = "x86_64",
+    all(target_arch = "aarch64", target_feature = "neon")
+))]
 #[allow(
     unused_imports,
     reason = "a target without a vector form uses only some"
