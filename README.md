@@ -34,6 +34,11 @@ standard digest, with output equivalent to a non-detecting SHA-1
 implementation. `mitigate::Hasher` computes an alternative digest instead. Both
 report a detected attack as an error. The [documentation] covers both.
 
+## Features
+
+- `std` *(default)*: Enables run-time CPU feature detection for hardware
+  acceleration and `std::io::Write` support for the hasher.
+
 ## Performance
 
 These figures compare the crate against two others: [`sha1`], which does no
@@ -74,11 +79,6 @@ against the original implementation rather than against itself.
 CI runs the tests on x86-64 and AArch64, on Linux, macOS and Windows, and under
 QEMU on big-endian s390x, 32-bit x86 and older x86 CPUs, so that every form of
 the filter and every backend runs somewhere.
-
-## Features
-
-- `std` *(default)*: Enables run-time CPU feature detection for hardware
-  acceleration and `std::io::Write` support for the hasher.
 
 ## License
 
