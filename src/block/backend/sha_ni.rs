@@ -2,14 +2,17 @@
 //!
 //! Computes a block's digest and spills the expanded message schedule, which
 //! the collision detection needs. The spill is the difference from an
-//! ordinary SHA-1: `sha1msg1`/`sha1msg2` keep the schedule in registers, and
-//! the check needs all 80 words in memory.
+//! ordinary SHA-1, which keeps the schedule in registers.
 //!
 //! `sha1rnds4` does four rounds at a time, so the work is in groups of four.
-//! Each group consumes the four schedule words that are ready, finishes the
-//! four that the next group needs, and takes the first two of the three steps
-//! that will finish the group after that. `sha1nexte` carries the fifth
-//! working word between groups, which is why two of them alternate.
+//! `sha1nexte` carries the fifth working word between groups, which is why
+//! two of them alternate. The schedule runs four groups ahead of the rounds.
+//! Words 16 to 31 come from SHA-NI's schedule instructions,
+//! `sha1msg1`/`sha1msg2`. The rest come from plain SSE instructions, by
+//! another form of the recurrence (see [`expand_rol2`]). Sapphire Rapids
+//! microcodes `sha1msg2`, and sixteen of them a block keep the whole
+//! compression out of the µop cache, where the filter's prefix then cannot
+//! hide behind it.
 
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
 compile_error!("the sha_ni backend needs an x86 or x86_64 target");
@@ -86,141 +89,157 @@ fn store_abcd(state: &mut [u32; 5], abcd: __m128i) {
     );
 }
 
-/// Compresses one block, spilling the message schedule into `w`.
-///
-/// Requires `sha`, `sse2`, `ssse3` and `sse4.1`, so a caller that cannot
-/// prove the features needs an `unsafe` block.
+/// Schedule words `4k..4k + 4` for `k` from 4 to 7, from the four groups
+/// before, with the SHA-NI expansion instructions.
 #[inline]
-#[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
-pub(crate) fn compress_spill(
-    state: &mut [u32; 5],
-    block: &[u8; 64],
-    w: &mut Schedule,
-    at_60: &mut [u32; 5],
-    at_64: &mut [u32; 5],
-) {
-    /// One group of four rounds, once the schedule is under way.
-    ///
-    /// `ready` holds the words these rounds use. `next` is finished here,
-    /// and the two groups behind it take the first and second of their three
-    /// steps. The working word arrives in `live` and the one for the next
-    /// group is put aside in `held`.
-    macro_rules! group {
-        (
-            $w:expr, $t:literal, $k:expr, $abcd:ident, $live:ident, $held:ident,
-            $ready:ident, $next:ident, $second:ident, $first:ident
-        ) => {{
-            spill::<$t>($w, $ready);
-            $live = _mm_sha1nexte_epu32($live, $ready);
-            $held = $abcd;
-            $next = _mm_sha1msg2_epu32($next, $ready);
-            $abcd = _mm_sha1rnds4_epu32($abcd, $live, $k);
-            $first = _mm_sha1msg1_epu32($first, $ready);
-            $second = _mm_xor_si128($second, $ready);
-        }};
-        (
-            $w:expr, $t:literal, $k:expr, $abcd:ident, $live:ident, $held:ident,
-            $ready:ident, $next:ident, $second:ident, $first:ident => $at:ident
-        ) => {{
-            spill::<$t>($w, $ready);
-            $live = _mm_sha1nexte_epu32($live, $ready);
-            // As held: `abcd` reversed in the first four words, and E + W in
-            // the fifth, from the top of a store one word further on.
-            store_u32x4((&mut $at[1..5]).try_into().unwrap(), $live);
-            store_u32x4($at.first_chunk_mut().unwrap(), $abcd);
-            $held = $abcd;
-            $next = _mm_sha1msg2_epu32($next, $ready);
-            $abcd = _mm_sha1rnds4_epu32($abcd, $live, $k);
-            $first = _mm_sha1msg1_epu32($first, $ready);
-            $second = _mm_xor_si128($second, $ready);
-        }};
-    }
-
-    // Turns the big-endian message into native order, reversing the four
-    // words along with the bytes.
-    let swap = _mm_set_epi64x(0x0001_0203_0405_0607, 0x0809_0A0B_0C0D_0E0F);
-
-    let mut abcd = load_abcd(state);
-    let abcd_in = abcd;
-    let e_in = _mm_set_epi32(state[4] as i32, 0, 0, 0);
-
-    let mut msg0 = msg::<0>(block, swap);
-    let mut msg1 = msg::<16>(block, swap);
-    let mut msg2 = msg::<32>(block, swap);
-    let mut msg3 = msg::<48>(block, swap);
-
-    // The first sixteen words are the block itself. The expansion starts as
-    // soon as enough of them are in, so these four groups build up to the
-    // steady shape of `group!`.
-    spill::<0>(w, msg0);
-    let mut e0 = _mm_add_epi32(e_in, msg0);
-    let mut e1 = abcd;
-    abcd = _mm_sha1rnds4_epu32(abcd, e0, 0);
-
-    spill::<4>(w, msg1);
-    e1 = _mm_sha1nexte_epu32(e1, msg1);
-    e0 = abcd;
-    abcd = _mm_sha1rnds4_epu32(abcd, e1, 0);
-    msg0 = _mm_sha1msg1_epu32(msg0, msg1);
-
-    spill::<8>(w, msg2);
-    e0 = _mm_sha1nexte_epu32(e0, msg2);
-    e1 = abcd;
-    abcd = _mm_sha1rnds4_epu32(abcd, e0, 0);
-    msg1 = _mm_sha1msg1_epu32(msg1, msg2);
-    msg0 = _mm_xor_si128(msg0, msg2);
-
-    spill::<12>(w, msg3);
-    e1 = _mm_sha1nexte_epu32(e1, msg3);
-    e0 = abcd;
-    msg0 = _mm_sha1msg2_epu32(msg0, msg3);
-    abcd = _mm_sha1rnds4_epu32(abcd, e1, 0);
-    msg2 = _mm_sha1msg1_epu32(msg2, msg3);
-    msg1 = _mm_xor_si128(msg1, msg3);
-
-    // Steady state. The four message registers take turns, and so do the two
-    // working words.
-    group!(w, 16, 0, abcd, e0, e1, msg0, msg1, msg2, msg3);
-    group!(w, 20, 1, abcd, e1, e0, msg1, msg2, msg3, msg0);
-    group!(w, 24, 1, abcd, e0, e1, msg2, msg3, msg0, msg1);
-    group!(w, 28, 1, abcd, e1, e0, msg3, msg0, msg1, msg2);
-    group!(w, 32, 1, abcd, e0, e1, msg0, msg1, msg2, msg3);
-    group!(w, 36, 1, abcd, e1, e0, msg1, msg2, msg3, msg0);
-    group!(w, 40, 2, abcd, e0, e1, msg2, msg3, msg0, msg1);
-    group!(w, 44, 2, abcd, e1, e0, msg3, msg0, msg1, msg2);
-    group!(w, 48, 2, abcd, e0, e1, msg0, msg1, msg2, msg3);
-    group!(w, 52, 2, abcd, e1, e0, msg1, msg2, msg3, msg0);
-    group!(w, 56, 2, abcd, e0, e1, msg2, msg3, msg0, msg1);
-    group!(w, 60, 3, abcd, e1, e0, msg3, msg0, msg1, msg2 => at_60);
-    group!(w, 64, 3, abcd, e0, e1, msg0, msg1, msg2, msg3 => at_64);
-
-    // The last words are already in hand, so the expansion stops one step at
-    // a time.
-    spill::<68>(w, msg1);
-    e1 = _mm_sha1nexte_epu32(e1, msg1);
-    e0 = abcd;
-    msg2 = _mm_sha1msg2_epu32(msg2, msg1);
-    abcd = _mm_sha1rnds4_epu32(abcd, e1, 3);
-    msg3 = _mm_xor_si128(msg3, msg1);
-
-    spill::<72>(w, msg2);
-    e0 = _mm_sha1nexte_epu32(e0, msg2);
-    e1 = abcd;
-    msg3 = _mm_sha1msg2_epu32(msg3, msg2);
-    abcd = _mm_sha1rnds4_epu32(abcd, e0, 3);
-
-    spill::<76>(w, msg3);
-    e1 = _mm_sha1nexte_epu32(e1, msg3);
-    e0 = abcd;
-    abcd = _mm_sha1rnds4_epu32(abcd, e1, 3);
-
-    // Feed-forward.
-    e0 = _mm_sha1nexte_epu32(e0, e_in);
-    abcd = _mm_add_epi32(abcd, abcd_in);
-
-    store_abcd(state, abcd);
-    state[4] = _mm_extract_epi32(e0, 3) as u32;
+#[target_feature(enable = "sha,sse2")]
+fn expand_ni(a: __m128i, b: __m128i, c: __m128i, d: __m128i) -> __m128i {
+    _mm_sha1msg2_epu32(_mm_xor_si128(_mm_sha1msg1_epu32(a, b), c), d)
 }
+
+/// Schedule words `4k..4k + 4` for `k` from 8 on, from groups `k - 8`,
+/// `k - 7`, `k - 4`, `k - 2` and `k - 1`.
+///
+/// From step 32 on, the usual recurrence applied twice gives
+/// `W[t] = (W[t-6] ^ W[t-16] ^ W[t-28] ^ W[t-32]) <<< 2`, in which no word of
+/// a group depends on another, so no `sha1msg2` is needed.
+#[inline]
+#[target_feature(enable = "sse2,ssse3")]
+fn expand_rol2(v8: __m128i, v7: __m128i, v4: __m128i, v2: __m128i, v1: __m128i) -> __m128i {
+    let far = _mm_xor_si128(_mm_xor_si128(v8, v7), v4);
+    // Words `t - 6` to `t - 3`: the last two of group `k - 2`, the first two
+    // of group `k - 1`.
+    let x = _mm_xor_si128(far, _mm_alignr_epi8(v2, v1, 8));
+    _mm_or_si128(_mm_slli_epi32(x, 2), _mm_srli_epi32(x, 30))
+}
+
+/// One group of four rounds, on the words of step `$t` on, spilling them to
+/// `$w`. The working word arrives in `live` and the one for the next group is
+/// put aside in `held`. With `=> $at`, also stores the state it starts from.
+macro_rules! rounds {
+    ($w:ident, $v:ident, $abcd:ident, $t:literal, $k:expr, $live:ident, $held:ident) => {{
+        spill::<$t>($w, $v[$t / 4]);
+        $live = _mm_sha1nexte_epu32($live, $v[$t / 4]);
+        $held = $abcd;
+        $abcd = _mm_sha1rnds4_epu32($abcd, $live, $k);
+    }};
+    ($w:ident, $v:ident, $abcd:ident, $t:literal, $k:expr, $live:ident, $held:ident => $at:ident) => {{
+        spill::<$t>($w, $v[$t / 4]);
+        $live = _mm_sha1nexte_epu32($live, $v[$t / 4]);
+        // As held: `abcd` reversed in the first four words, and E + W in the
+        // fifth, from the top of a store one word further on.
+        store_u32x4((&mut $at[1..5]).try_into().unwrap(), $live);
+        store_u32x4($at.first_chunk_mut().unwrap(), $abcd);
+        $held = $abcd;
+        $abcd = _mm_sha1rnds4_epu32($abcd, $live, $k);
+    }};
+}
+
+/// Computes group `$k` of the schedule `$v` by the rol-2 recurrence.
+macro_rules! rol2 {
+    ($v:ident, $k:literal) => {
+        $v[$k] = expand_rol2($v[$k - 8], $v[$k - 7], $v[$k - 4], $v[$k - 2], $v[$k - 1])
+    };
+}
+
+/// A compression that spills the schedule, built with `$features`. Written
+/// once and emitted for each build, so that each is compiled with its own
+/// features rather than relying on one being inlined into the other.
+macro_rules! compress_spill_fn {
+    ($(#[$doc:meta])* $name:ident, $features:literal) => {
+        $(#[$doc])*
+        #[inline]
+        #[target_feature(enable = $features)]
+        pub(crate) fn $name(
+            state: &mut [u32; 5],
+            block: &[u8; 64],
+            w: &mut Schedule,
+            at_60: &mut [u32; 5],
+            at_64: &mut [u32; 5],
+        ) {
+            // Turns the big-endian message into native order, reversing the
+            // four words along with the bytes.
+            let swap = _mm_set_epi64x(0x0001_0203_0405_0607, 0x0809_0A0B_0C0D_0E0F);
+
+            let mut abcd = load_abcd(state);
+            let abcd_in = abcd;
+            let e_in = _mm_set_epi32(state[4] as i32, 0, 0, 0);
+
+            // `v[k]` holds the words of steps `4k..4k + 4`, in the order the
+            // rounds take them. Each group of rounds computes the one four
+            // groups on.
+            let mut v = [_mm_setzero_si128(); 20];
+            v[0] = msg::<0>(block, swap);
+            v[1] = msg::<16>(block, swap);
+            v[2] = msg::<32>(block, swap);
+            v[3] = msg::<48>(block, swap);
+
+            spill::<0>(w, v[0]);
+            let mut e0 = _mm_add_epi32(e_in, v[0]);
+            let mut e1 = abcd;
+            abcd = _mm_sha1rnds4_epu32(abcd, e0, 0);
+            v[4] = expand_ni(v[0], v[1], v[2], v[3]);
+
+            rounds!(w, v, abcd, 4, 0, e1, e0);
+            v[5] = expand_ni(v[1], v[2], v[3], v[4]);
+            rounds!(w, v, abcd, 8, 0, e0, e1);
+            v[6] = expand_ni(v[2], v[3], v[4], v[5]);
+            rounds!(w, v, abcd, 12, 0, e1, e0);
+            v[7] = expand_ni(v[3], v[4], v[5], v[6]);
+            rounds!(w, v, abcd, 16, 0, e0, e1);
+            rol2!(v, 8);
+            rounds!(w, v, abcd, 20, 1, e1, e0);
+            rol2!(v, 9);
+            rounds!(w, v, abcd, 24, 1, e0, e1);
+            rol2!(v, 10);
+            rounds!(w, v, abcd, 28, 1, e1, e0);
+            rol2!(v, 11);
+            rounds!(w, v, abcd, 32, 1, e0, e1);
+            rol2!(v, 12);
+            rounds!(w, v, abcd, 36, 1, e1, e0);
+            rol2!(v, 13);
+            rounds!(w, v, abcd, 40, 2, e0, e1);
+            rol2!(v, 14);
+            rounds!(w, v, abcd, 44, 2, e1, e0);
+            rol2!(v, 15);
+            rounds!(w, v, abcd, 48, 2, e0, e1);
+            rol2!(v, 16);
+            rounds!(w, v, abcd, 52, 2, e1, e0);
+            rol2!(v, 17);
+            rounds!(w, v, abcd, 56, 2, e0, e1);
+            rol2!(v, 18);
+            rounds!(w, v, abcd, 60, 3, e1, e0 => at_60);
+            rol2!(v, 19);
+            rounds!(w, v, abcd, 64, 3, e0, e1 => at_64);
+            rounds!(w, v, abcd, 68, 3, e1, e0);
+            rounds!(w, v, abcd, 72, 3, e0, e1);
+            rounds!(w, v, abcd, 76, 3, e1, e0);
+
+            // Feed-forward.
+            e0 = _mm_sha1nexte_epu32(e0, e_in);
+            abcd = _mm_add_epi32(abcd, abcd_in);
+
+            store_abcd(state, abcd);
+            state[4] = _mm_extract_epi32(e0, 3) as u32;
+        }
+    };
+}
+
+compress_spill_fn!(
+    /// Compresses one block, spilling the message schedule into `w`.
+    ///
+    /// Requires `sha`, `sse2`, `ssse3` and `sse4.1`, so a caller that cannot
+    /// prove the features needs an `unsafe` block.
+    compress_spill,
+    "sha,sse2,ssse3,sse4.1"
+);
+
+compress_spill_fn!(
+    /// [`compress_spill`] built with AVX too, whose three-operand forms keep
+    /// the schedule's inputs without copying them first.
+    compress_spill_avx,
+    "sha,sse2,ssse3,sse4.1,avx"
+);
 
 /// Whether this candidate is the attack it is a candidate for.
 ///

@@ -57,10 +57,28 @@ fn has_sha1_instructions() -> bool {
     }
 }
 
+/// Whether this CPU has AVX, which a SHA-NI one need not: the Atoms have
+/// SHA-NI without it.
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn has_avx() -> bool {
+    #[cfg(feature = "std")]
+    {
+        std::arch::is_x86_feature_detected!("avx")
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        cfg!(target_feature = "avx")
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Repr {
+    /// With `avx`, built with AVX's three-operand forms, which the schedule
+    /// needs no copies in.
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    ShaNi,
+    ShaNi {
+        avx: bool,
+    },
     #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
     Armv8,
     Scalar,
@@ -80,7 +98,7 @@ impl Backend {
         ))]
         if has_sha1_instructions() {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            return Self(Repr::ShaNi);
+            return Self(Repr::ShaNi { avx: has_avx() });
             #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             return Self(Repr::Armv8);
         }
@@ -110,9 +128,15 @@ impl Backend {
     ) {
         match self.0 {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Repr::ShaNi => {
-                // SAFETY: `Repr::ShaNi` means the features were checked.
-                unsafe { sha_ni::compress_spill(state, block, m1, state_58, state_65) };
+            Repr::ShaNi { avx } => {
+                if avx {
+                    // SAFETY: `Repr::ShaNi` means the features were checked,
+                    // and `avx` that AVX was too.
+                    unsafe { sha_ni::compress_spill_avx(state, block, m1, state_58, state_65) };
+                } else {
+                    // SAFETY: `Repr::ShaNi` means the features were checked.
+                    unsafe { sha_ni::compress_spill(state, block, m1, state_58, state_65) };
+                }
             }
             #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             Repr::Armv8 => {
@@ -154,7 +178,7 @@ impl Backend {
             }
             // As `sha1rnds4` holds them: reversed, with E + W on the end.
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Repr::ShaNi => {
+            Repr::ShaNi { .. } => {
                 for (s, t) in [(&mut *state_58, 60), (&mut *state_65, 64)] {
                     *s = [s[3], s[2], s[1], s[0], s[4].wrapping_sub(m1[t])];
                 }
@@ -187,7 +211,7 @@ impl Backend {
         match self.0 {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
             // SAFETY: `Repr::ShaNi` is chosen only where the instructions are.
-            Repr::ShaNi => unsafe { sha_ni::recompress(step, m1, dm, state, chaining_out) },
+            Repr::ShaNi { .. } => unsafe { sha_ni::recompress(step, m1, dm, state, chaining_out) },
             #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             // SAFETY: `Repr::Armv8` is chosen only where the instructions are.
             Repr::Armv8 => unsafe { armv8::recompress(step, m1, dm, state, chaining_out) },
@@ -215,7 +239,7 @@ mod tests {
     fn is_hardware(backend: &Backend) -> bool {
         match backend.0 {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Repr::ShaNi => true,
+            Repr::ShaNi { .. } => true,
             #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             Repr::Armv8 => true,
             Repr::Scalar => false,
@@ -226,7 +250,7 @@ mod tests {
     fn name(backend: &Backend) -> &'static str {
         match backend.0 {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Repr::ShaNi => "sha-ni",
+            Repr::ShaNi { .. } => "sha-ni",
             #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             Repr::Armv8 => "armv8",
             Repr::Scalar => "scalar",

@@ -80,7 +80,7 @@ const TARGETS: &[Target] = &[
         name: "avx2",
         params: Params {
             width: 8,
-            groups: 14,
+            groups: 16,
             ops: LANE_BIT,
         },
         tail: Shape::Table,
