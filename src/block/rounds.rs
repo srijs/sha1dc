@@ -121,16 +121,24 @@ macro_rules! unfive {
 }
 
 /// A source of schedule words for the rounds above: an array for the
-/// compression, [`Xor`] for the recompression.
+/// compression, the block itself for its first sixteen, [`Xor`] for the
+/// recompression.
 ///
 /// Every index is a constant at the call, so `at` is a constant-offset load
 /// with no bounds check. [`Schedule`] knows where the spill actually put the
 /// word; nothing here has to.
-trait Words {
+pub(crate) trait Words {
     fn at(&self, t: usize) -> u32;
 }
 
 impl Words for Schedule {
+    #[inline(always)]
+    fn at(&self, t: usize) -> u32 {
+        self[t]
+    }
+}
+
+impl Words for [u32; 16] {
     #[inline(always)]
     fn at(&self, t: usize) -> u32 {
         self[t]
@@ -210,8 +218,13 @@ macro_rules! five_expand {
     }};
 }
 
-/// The round primitives are shared with [`super::backend::scalar`], which
-/// runs them over a whole block.
+#[allow(
+    unused_imports,
+    reason = "only the `x86` compression without SHA-NI uses it outside this file"
+)]
+pub(crate) use five;
+/// The round primitives are shared with [`super::backend::scalar`] and the
+/// `x86` one without SHA-NI, which run them over a whole block.
 pub(crate) use {five_expand, five_load, step, step_expand, step_load};
 
 #[inline(always)]

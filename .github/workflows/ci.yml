@@ -107,7 +107,7 @@ jobs:
           - { name: s390x big-endian, target: s390x-unknown-linux-gnu, cpu: max, block: scalar, ubc_check: scalar, deps: gcc-s390x-linux-gnu }
           - { name: i686, target: i686-unknown-linux-gnu, cpu: max, block: sha-ni, ubc_check: avx2, deps: gcc-multilib }
           - { name: i586, target: i586-unknown-linux-gnu, cpu: max, block: sha-ni, ubc_check: scalar, deps: gcc-multilib }
-          - { name: x86_64 sse2, target: x86_64-unknown-linux-gnu, cpu: Nehalem, block: scalar, ubc_check: sse2 }
+          - { name: x86_64 sse2, target: x86_64-unknown-linux-gnu, cpu: Nehalem, block: sse2, ubc_check: sse2 }
           - { name: x86_64 atom, target: x86_64-unknown-linux-gnu, cpu: Denverton, block: sha-ni, ubc_check: sse2 }
     steps:
       - uses: actions/checkout@v7

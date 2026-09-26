@@ -1,9 +1,10 @@
 //! SHA-1 scalar backend, for a CPU with no SHA-1 instructions.
 //!
-//! The counterpart of [`sha_ni`](super::sha_ni) and [`armv8`](super::armv8).
-//! Those two get the schedule for free from the instructions and have to
-//! spill it; here it is expanded a word at a time into the round that needs
-//! it, so the spill costs one store.
+//! The counterpart of [`sha_ni`](super::x86::sha_ni) and
+//! [`armv8`](super::armv8). Those two get the schedule for free from the
+//! instructions and have to spill it; here it is expanded a word at a time
+//! into the round that needs it, so the spill costs one store. On `x86` with
+//! SSE2, [`sse2`](super::x86::sse2) builds it four words at a time instead.
 //!
 //! The steps come from [`rounds`](super::super::rounds), which also runs them
 //! backwards for the detection.
@@ -15,6 +16,18 @@ use crate::block::rounds::{
 
 /// Expands `m` into `w`, runs all 80 steps, and stores the two states that
 /// recompression starts from.
+///
+/// On `x86` with SSE2 this one only serves [`Backend::scalar`], so it stays
+/// out of the block loop rather than growing it.
+///
+/// [`Backend::scalar`]: super::Backend::scalar
+#[cfg_attr(
+    all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "sse2"
+    ),
+    inline(never)
+)]
 pub(crate) fn compress_spill(
     ihv: &mut [u32; 5],
     m: &[u32; 16],

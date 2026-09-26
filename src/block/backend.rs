@@ -1,11 +1,12 @@
 //! Selects between the hardware and scalar SHA-1 compression implementations.
 //!
-//! The three are [`sha_ni`], [`armv8`] and [`scalar`], one file each. All of
-//! them leave the expanded schedule behind, which the detection needs and an
-//! ordinary SHA-1 would not keep.
+//! The hardware ones are [`x86::ShaNi`] and [`armv8`]. Without them, `x86`
+//! with SSE2 takes [`x86::sse2`], and every other target the portable
+//! [`scalar`]. All of them leave the expanded schedule behind, which the
+//! detection needs and an ordinary SHA-1 would not keep.
 //!
-//! [`Backend::scalar`] selects the scalar one. Tests use it to run that path
-//! on a machine that has the instructions.
+//! [`Backend::scalar`] selects the portable one on every target. Tests use it
+//! to run that path on a machine with the instructions, and as a reference.
 
 use crate::block::rounds;
 use crate::ubc_check::RecompressFrom;
@@ -17,70 +18,37 @@ use crate::{BLOCK_SIZE, Schedule};
 mod armv8;
 mod scalar;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-mod sha_ni;
+mod x86;
 
-/// Whether this CPU has the SHA-1 instructions the hardware backend needs.
+/// Whether this CPU has the SHA-1 instructions [`armv8`] needs.
 ///
-/// A `std` build asks the OS at run time. Run-time detection needs `cpuid` or
-/// a system call, so a `no_std` build uses `target_feature` only. Such a build
-/// needs the features on the command line, for example
-/// `-C target-feature=+sha2`.
-#[cfg(any(
-    target_arch = "x86",
-    target_arch = "x86_64",
-    all(target_arch = "aarch64", target_feature = "neon")
-))]
+/// A `std` build asks the OS at run time. Run-time detection needs a system
+/// call, so a `no_std` build uses `target_feature` only. Such a build needs
+/// the features on the command line, for example `-C target-feature=+sha2`.
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 fn has_sha1_instructions() -> bool {
-    #[cfg(all(feature = "std", any(target_arch = "x86", target_arch = "x86_64")))]
-    {
-        std::arch::is_x86_feature_detected!("sha")
-            && std::arch::is_x86_feature_detected!("sse2")
-            && std::arch::is_x86_feature_detected!("ssse3")
-            && std::arch::is_x86_feature_detected!("sse4.1")
-    }
-    #[cfg(all(feature = "std", target_arch = "aarch64", target_feature = "neon"))]
+    #[cfg(feature = "std")]
     {
         std::arch::is_aarch64_feature_detected!("sha2")
     }
-    #[cfg(all(not(feature = "std"), any(target_arch = "x86", target_arch = "x86_64")))]
-    {
-        cfg!(all(
-            target_feature = "sha",
-            target_feature = "sse2",
-            target_feature = "ssse3",
-            target_feature = "sse4.1"
-        ))
-    }
-    #[cfg(all(not(feature = "std"), target_arch = "aarch64", target_feature = "neon"))]
+    #[cfg(not(feature = "std"))]
     {
         cfg!(target_feature = "sha2")
     }
 }
 
-/// Whether this CPU has AVX, which a SHA-NI one need not: the Atoms have
-/// SHA-NI without it.
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-fn has_avx() -> bool {
-    #[cfg(feature = "std")]
-    {
-        std::arch::is_x86_feature_detected!("avx")
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        cfg!(target_feature = "avx")
-    }
-}
-
 #[derive(Clone, Copy)]
 enum Repr {
-    /// With `avx`, built with AVX's three-operand forms, which the schedule
-    /// needs no copies in.
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    ShaNi {
-        avx: bool,
-    },
+    ShaNi(x86::ShaNi),
     #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
     Armv8,
+    /// No SHA-1 instructions, on `x86` with SSE2.
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "sse2"
+    ))]
+    Sse2,
     Scalar,
 }
 
@@ -91,22 +59,28 @@ pub(crate) struct Backend(Repr);
 
 impl Backend {
     pub(crate) fn new() -> Self {
-        #[cfg(any(
-            target_arch = "x86",
-            target_arch = "x86_64",
-            all(target_arch = "aarch64", target_feature = "neon")
-        ))]
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        if let Some(sha_ni) = x86::ShaNi::detect() {
+            return Self(Repr::ShaNi(sha_ni));
+        }
+        #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
         if has_sha1_instructions() {
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            return Self(Repr::ShaNi { avx: has_avx() });
-            #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             return Self(Repr::Armv8);
         }
 
+        #[cfg(all(
+            any(target_arch = "x86", target_arch = "x86_64"),
+            target_feature = "sse2"
+        ))]
+        return Self(Repr::Sse2);
+        #[cfg(not(all(
+            any(target_arch = "x86", target_arch = "x86_64"),
+            target_feature = "sse2"
+        )))]
         Self(Repr::Scalar)
     }
 
-    /// The scalar implementation, on every CPU.
+    /// The portable implementation, on every CPU.
     pub(crate) fn scalar() -> Self {
         Self(Repr::Scalar)
     }
@@ -128,26 +102,26 @@ impl Backend {
     ) {
         match self.0 {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Repr::ShaNi { avx } => {
-                if avx {
-                    // SAFETY: `Repr::ShaNi` means the features were checked,
-                    // and `avx` that AVX was too.
-                    unsafe { sha_ni::compress_spill_avx(state, block, m1, state_58, state_65) };
-                } else {
-                    // SAFETY: `Repr::ShaNi` means the features were checked.
-                    unsafe { sha_ni::compress_spill(state, block, m1, state_58, state_65) };
-                }
-            }
+            Repr::ShaNi(sha_ni) => sha_ni.compress_spill(state, block, m1, state_58, state_65),
             #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             Repr::Armv8 => {
                 // SAFETY: `Repr::Armv8` means the features were checked.
                 unsafe { armv8::compress_spill(state, block, m1, state_58, state_65) };
             }
-            // Only this arm decodes the block. The other two byte-swap in
-            // their own loads, and the buffer stays here rather than moving
-            // into `scalar` so that it is hoisted out of the loop over blocks
-            // instead of being built again for each one. Moving it measures
-            // 4% of the scalar backend.
+            // Only these two arms decode the block. The hardware ones byte-swap
+            // in their own loads, and the buffer stays here rather than moving
+            // into the compression so that it is hoisted out of the loop over
+            // blocks instead of being built again for each one. Moving it
+            // measures 4% of the scalar backend.
+            #[cfg(all(
+                any(target_arch = "x86", target_arch = "x86_64"),
+                target_feature = "sse2"
+            ))]
+            Repr::Sse2 => {
+                let mut block_u32 = [0u32; BLOCK_SIZE / 4];
+                read_block(block, &mut block_u32);
+                x86::sse2::compress_spill(state, &block_u32, m1, state_58, state_65);
+            }
             Repr::Scalar => {
                 let mut block_u32 = [0u32; BLOCK_SIZE / 4];
                 read_block(block, &mut block_u32);
@@ -173,12 +147,17 @@ impl Backend {
     ) {
         match self.0 {
             // The compression stored them itself.
+            #[cfg(all(
+                any(target_arch = "x86", target_arch = "x86_64"),
+                target_feature = "sse2"
+            ))]
+            Repr::Sse2 => {}
             Repr::Scalar => {
                 let _ = (m1, need_58, state_58, state_65);
             }
             // As `sha1rnds4` holds them: reversed, with E + W on the end.
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Repr::ShaNi { .. } => {
+            Repr::ShaNi(_) => {
                 for (s, t) in [(&mut *state_58, 60), (&mut *state_65, 64)] {
                     *s = [s[3], s[2], s[1], s[0], s[4].wrapping_sub(m1[t])];
                 }
@@ -210,18 +189,32 @@ impl Backend {
     ) -> bool {
         match self.0 {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            // SAFETY: `Repr::ShaNi` is chosen only where the instructions are.
-            Repr::ShaNi { .. } => unsafe { sha_ni::recompress(step, m1, dm, state, chaining_out) },
+            Repr::ShaNi(sha_ni) => sha_ni.recompress(step, m1, dm, state, chaining_out),
             #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             // SAFETY: `Repr::Armv8` is chosen only where the instructions are.
             Repr::Armv8 => unsafe { armv8::recompress(step, m1, dm, state, chaining_out) },
-            Repr::Scalar => {
-                let (mut ihv2, mut ends_on) = ([0u32; 5], [0u32; 5]);
-                rounds::recompression_step(step, &mut ihv2, &mut ends_on, m1, dm, state);
-                super::xor(&ends_on, chaining_out) == 0
-            }
+            #[cfg(all(
+                any(target_arch = "x86", target_arch = "x86_64"),
+                target_feature = "sse2"
+            ))]
+            Repr::Sse2 => is_attack_backwards(step, m1, dm, state, chaining_out),
+            Repr::Scalar => is_attack_backwards(step, m1, dm, state, chaining_out),
         }
     }
+}
+
+/// [`Backend::is_attack`] without SHA-1 instructions: the way back.
+#[inline]
+fn is_attack_backwards(
+    step: RecompressFrom,
+    m1: &Schedule,
+    dm: &[u32; 80],
+    state: &[u32; 5],
+    chaining_out: &[u32; 5],
+) -> bool {
+    let (mut ihv2, mut ends_on) = ([0u32; 5], [0u32; 5]);
+    rounds::recompression_step(step, &mut ihv2, &mut ends_on, m1, dm, state);
+    super::xor(&ends_on, chaining_out) == 0
 }
 
 /// Reads a block as big-endian `u32` words.
@@ -239,9 +232,14 @@ mod tests {
     fn is_hardware(backend: &Backend) -> bool {
         match backend.0 {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Repr::ShaNi { .. } => true,
+            Repr::ShaNi(_) => true,
             #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             Repr::Armv8 => true,
+            #[cfg(all(
+                any(target_arch = "x86", target_arch = "x86_64"),
+                target_feature = "sse2"
+            ))]
+            Repr::Sse2 => false,
             Repr::Scalar => false,
         }
     }
@@ -250,9 +248,14 @@ mod tests {
     fn name(backend: &Backend) -> &'static str {
         match backend.0 {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            Repr::ShaNi { .. } => "sha-ni",
+            Repr::ShaNi(_) => "sha-ni",
             #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             Repr::Armv8 => "armv8",
+            #[cfg(all(
+                any(target_arch = "x86", target_arch = "x86_64"),
+                target_feature = "sse2"
+            ))]
+            Repr::Sse2 => "sse2",
             Repr::Scalar => "scalar",
         }
     }

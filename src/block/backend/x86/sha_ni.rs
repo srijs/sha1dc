@@ -22,28 +22,11 @@ use core::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::*;
 
+use super::{REVERSE, expand_rol2, spill};
 use crate::Schedule;
 use crate::block::rounds;
 use crate::mem::{load_u8x16, load_u32x4, store_u32x4};
 use crate::ubc_check::RecompressFrom;
-
-/// SHA-NI holds the four words of a group in the opposite order to the
-/// schedule, so every crossing between the two reverses them.
-const REVERSE: i32 = 0b00_01_10_11;
-
-/// Writes the four words a group is about to use into the schedule.
-///
-/// The group is held reversed, so it goes to the mirrored offset rather than
-/// through a `pshufd` to put it in order. What that leaves is [`Schedule`]'s
-/// backwards layout, which every reader of it already indexes through.
-///
-/// `I` is a const parameter, so a spill past the end of the schedule is a
-/// compile error at the call site rather than a promise in a comment.
-#[inline]
-#[target_feature(enable = "sse2")]
-fn spill<const I: usize>(w: &mut Schedule, msg: __m128i) {
-    store_u32x4(w.window_mut::<I, 4>(), msg);
-}
 
 /// The four message words starting at byte `I`, in native order.
 ///
@@ -97,20 +80,90 @@ fn expand_ni(a: __m128i, b: __m128i, c: __m128i, d: __m128i) -> __m128i {
     _mm_sha1msg2_epu32(_mm_xor_si128(_mm_sha1msg1_epu32(a, b), c), d)
 }
 
-/// Schedule words `4k..4k + 4` for `k` from 8 on, from groups `k - 8`,
-/// `k - 7`, `k - 4`, `k - 2` and `k - 1`.
+/// Whether this CPU has the instructions this module needs.
 ///
-/// From step 32 on, the usual recurrence applied twice gives
-/// `W[t] = (W[t-6] ^ W[t-16] ^ W[t-28] ^ W[t-32]) <<< 2`, in which no word of
-/// a group depends on another, so no `sha1msg2` is needed.
-#[inline]
-#[target_feature(enable = "sse2,ssse3")]
-fn expand_rol2(v8: __m128i, v7: __m128i, v4: __m128i, v2: __m128i, v1: __m128i) -> __m128i {
-    let far = _mm_xor_si128(_mm_xor_si128(v8, v7), v4);
-    // Words `t - 6` to `t - 3`: the last two of group `k - 2`, the first two
-    // of group `k - 1`.
-    let x = _mm_xor_si128(far, _mm_alignr_epi8(v2, v1, 8));
-    _mm_or_si128(_mm_slli_epi32(x, 2), _mm_srli_epi32(x, 30))
+/// A `std` build asks the OS at run time. Run-time detection needs `cpuid`,
+/// so a `no_std` build uses `target_feature` only, which needs the features
+/// on the command line, for example `-C target-feature=+sha,+sse4.1`.
+fn has_sha_ni() -> bool {
+    #[cfg(feature = "std")]
+    {
+        std::arch::is_x86_feature_detected!("sha")
+            && std::arch::is_x86_feature_detected!("sse2")
+            && std::arch::is_x86_feature_detected!("ssse3")
+            && std::arch::is_x86_feature_detected!("sse4.1")
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        cfg!(all(
+            target_feature = "sha",
+            target_feature = "sse2",
+            target_feature = "ssse3",
+            target_feature = "sse4.1"
+        ))
+    }
+}
+
+/// Whether this CPU has AVX, which one with SHA-NI need not: the Atoms have
+/// SHA-NI without it.
+fn has_avx() -> bool {
+    #[cfg(feature = "std")]
+    {
+        std::arch::is_x86_feature_detected!("avx")
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        cfg!(target_feature = "avx")
+    }
+}
+
+/// Proof that this CPU has what this module needs, and whether it has AVX
+/// too. Only [`ShaNi::detect`] makes one, so holding one makes the
+/// compression safe to call.
+#[derive(Clone, Copy)]
+pub(crate) struct ShaNi {
+    avx: bool,
+}
+
+impl ShaNi {
+    /// Checks this CPU. `None` without SHA-NI.
+    pub(crate) fn detect() -> Option<Self> {
+        has_sha_ni().then(|| Self { avx: has_avx() })
+    }
+
+    /// Compresses one block, built with AVX's three-operand
+    /// forms where there is AVX, which the schedule needs no copies in.
+    #[inline]
+    pub(crate) fn compress_spill(
+        self,
+        state: &mut [u32; 5],
+        block: &[u8; 64],
+        w: &mut Schedule,
+        at_60: &mut [u32; 5],
+        at_64: &mut [u32; 5],
+    ) {
+        if self.avx {
+            // SAFETY: `detect` found SHA-NI and AVX.
+            unsafe { compress_spill_avx(state, block, w, at_60, at_64) };
+        } else {
+            // SAFETY: `detect` found SHA-NI.
+            unsafe { compress_spill(state, block, w, at_60, at_64) };
+        }
+    }
+
+    /// [`recompress`].
+    #[inline]
+    pub(crate) fn recompress(
+        self,
+        step: RecompressFrom,
+        m1: &Schedule,
+        dm: &[u32; 80],
+        state: &[u32; 5],
+        chaining_out: &[u32; 5],
+    ) -> bool {
+        // SAFETY: `detect` found SHA-NI.
+        unsafe { recompress(step, m1, dm, state, chaining_out) }
+    }
 }
 
 /// One group of four rounds, on the words of step `$t` on, spilling them to
@@ -150,7 +203,7 @@ macro_rules! compress_spill_fn {
         $(#[$doc])*
         #[inline]
         #[target_feature(enable = $features)]
-        pub(crate) fn $name(
+        fn $name(
             state: &mut [u32; 5],
             block: &[u8; 64],
             w: &mut Schedule,
@@ -250,7 +303,7 @@ compress_spill_fn!(
 /// [`Backend::is_attack`]: crate::block::Backend::is_attack
 #[inline]
 #[target_feature(enable = "sha,sse2,ssse3,sse4.1")]
-pub(crate) fn recompress(
+fn recompress(
     step: RecompressFrom,
     m1: &Schedule,
     dm: &[u32; 80],
