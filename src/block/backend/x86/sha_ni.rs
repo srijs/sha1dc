@@ -10,9 +10,8 @@
 //! Words 16 to 31 come from SHA-NI's schedule instructions,
 //! `sha1msg1`/`sha1msg2`. The rest come from plain SSE instructions, by
 //! another form of the recurrence (see [`expand_rol2`]). Sapphire Rapids
-//! microcodes `sha1msg2`, and sixteen of them a block keep the whole
-//! compression out of the µop cache, where the filter's prefix then cannot
-//! hide behind it.
+//! microcodes `sha1msg2`; with four a block rather than sixteen, the
+//! compression runs about a tenth faster there.
 
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
 compile_error!("the sha_ni backend needs an x86 or x86_64 target");

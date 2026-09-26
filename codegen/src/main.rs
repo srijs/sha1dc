@@ -46,8 +46,9 @@ use tail::Shape;
 
 /// What each target's plan is searched for. A group runs on every block, so
 /// the budget trades unconditional work against the tail. Each was measured
-/// with `bench/` on an Apple M4, a Xeon Platinum 8488C and a Graviton4;
-/// re-measure when the solver or an emitter changes.
+/// with `bench/` on an Apple M4, a Xeon Platinum 8488C and a Graviton4, and
+/// the AVX2 one on Zen 3, Zen 4, Ice Lake and Cascade Lake too; re-measure
+/// when the solver or an emitter changes.
 const TARGETS: &[Target] = &[
     Target {
         name: "scalar",
