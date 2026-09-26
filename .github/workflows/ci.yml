@@ -60,7 +60,9 @@ jobs:
         run: rustup toolchain install 1.87.0 --profile minimal --no-self-update
       - uses: Swatinem/rust-cache@v2
       - name: Formatting
-        run: cargo fmt --all --check
+        run: |
+          cargo fmt --all --check
+          cargo fmt --manifest-path fuzz/Cargo.toml --check
       - name: Clippy
         run: cargo clippy --workspace --all-features --all-targets -- -D warnings
       - name: Documentation
@@ -147,10 +149,36 @@ jobs:
           CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime run --dir ${{ github.workspace }}::${{ github.workspace }}
         run: cargo test -p sha1dc --all-features --target wasm32-wasip1
 
+  fuzz:
+    name: fuzz / ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: Differential against upstream
+        run: cargo fuzz run differential --target ${{ matrix.target }} -- -max_total_time=120 -max_len=8192
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+
   success:
     name: CI success
     runs-on: ubuntu-latest
-    needs: [test, checks, cross, emulated, wasm]
+    needs: [test, checks, cross, emulated, wasm, fuzz]
     if: always()
     steps:
       - name: Check that all jobs succeeded
