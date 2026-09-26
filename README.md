@@ -45,21 +45,31 @@ report a detected attack as an error. The [documentation] covers both.
 These figures compare the crate against two others: [`sha1`], which does no
 detection at all, and [`sha1-checked`], which detects the same collisions and
 is a direct translation of the original C code to Rust. Each is at the best it
-can do on the machine. The machines are an Apple M4 laptop, an EC2
-c7i.metal-24xl, an EC2 c7a.metal-48xl and an EC2 c8g.metal-24xl. Throughput
-is in MiB/s, and as a fraction of the [`sha1`] row.
+can do on the machine. Throughput is in MiB/s, and as a fraction of the
+[`sha1`] column.
 
-| implementation               |    Apple M4 | Xeon Platinum 8488C |   EPYC 9R14 |   Graviton4 |
-|------------------------------|------------:|--------------------:|------------:|------------:|
-| [`sha1`] 0.11.0              | 2985 (100%) |         1926 (100%) | 1844 (100%) | 1617 (100%) |
-| `sha1dc` (this crate)        |  2285 (77%) |          1480 (77%) |  1509 (82%) |  1308 (81%) |
-| [`sha1-checked`] 0.11.0-rc.0 |   721 (24%) |           465 (24%) |   448 (24%) |   409 (25%) |
+| machine         |    [`sha1`] |     `sha1dc` | [`sha1-checked`] |
+|-----------------|------------:|-------------:|-----------------:|
+|                 |    *0.11.0* | *this crate* |    *0.11.0-rc.0* |
+| **AArch64**     |             |              |                  |
+| Apple M4        | 2985 (100%) |   2285 (77%) |        721 (24%) |
+| Graviton4       | 1617 (100%) |   1308 (81%) |        409 (25%) |
+| **x86-64**      |             |              |                  |
+| Sapphire Rapids | 1926 (100%) |   1480 (77%) |        465 (24%) |
+| Ice Lake        | 1584 (100%) |   1226 (77%) |        322 (20%) |
+| Cascade Lake    |  628 (100%) |    557 (89%) |        330 (53%) |
+| Zen 4           | 1844 (100%) |   1509 (82%) |        448 (24%) |
+| Zen 3           | 1863 (100%) |   1523 (82%) |        418 (22%) |
 
 [`sha1`] and `sha1dc` both take the SHA-1 instructions of the machine,
-SHA-NI on the Xeon and the EPYC and the ARMv8 ones on the M4 and the
-Graviton4, and differ in whether they detect. The `sha1dc` shortfall from
-100% is therefore what detection costs: 18% to 23%, depending on the
-machine.
+SHA-NI on x86 and the ARMv8 ones on the M4 and the Graviton4, and differ in
+whether they detect. The `sha1dc` shortfall from 100% is therefore what
+detection costs: 18% to 23%, depending on the machine. Cascade Lake predates
+SHA-NI, so both compute SHA-1 in software there, and detection costs 11%.
+
+*The Apple M4 is a laptop; the rest are EC2 metal instances: c8g.metal-24xl
+(Graviton4), c7i.metal-24xl (Sapphire Rapids), c6i.metal (Ice Lake),
+c5.metal (Cascade Lake), c7a.metal-48xl (Zen 4) and c6a.metal (Zen 3).*
 
 ## Testing
 
