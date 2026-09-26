@@ -40,10 +40,12 @@
 //! its own whole check.
 //!
 //! Inside a module the checks are in two parts. The prefix runs on every
-//! block and is most of the cost. The tail runs the rest one at a time behind
-//! guards, because by then the mask is sparse and a guard that skips a check
-//! is worth more than the check costs. Where the split falls is what each
-//! target solves for.
+//! block. What it costs depends on the core: next to nothing where the core
+//! overlaps it with the compression, as Zen 4 and the ARM cores measured do,
+//! but most of detection's cost on a Sapphire Rapids Xeon, which does not.
+//! The tail runs the rest one at a time behind guards, because by then the
+//! mask is sparse and a guard that skips a check is worth more than the check
+//! costs. Where the split falls is what each target solves for.
 //!
 //! # Provenance
 //!
