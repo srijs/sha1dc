@@ -87,6 +87,50 @@ fn small(c: &mut Criterion) {
             );
         });
 
+        group.bench_function(BenchmarkId::new("sha1dc-digest", name), |b| {
+            b.iter_batched_ref(
+                fresh(lens.clone()),
+                |batch| {
+                    for msg in batch.messages() {
+                        black_box(sha1dc::digest(black_box(msg)).expect("no collision"));
+                    }
+                },
+                BatchSize::SmallInput,
+            );
+        });
+
+        // As git and gitoxide hash an object: its header, then its content,
+        // in two updates.
+        group.bench_function(BenchmarkId::new("sha1dc-object", name), |b| {
+            b.iter_batched_ref(
+                fresh(lens.clone()),
+                |batch| {
+                    for msg in batch.messages() {
+                        // `blob <len>\0`, formatted without allocating, so the
+                        // loop times the hashing rather than the header.
+                        let mut header = *b"blob \0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+                        let mut digits = [0u8; 20];
+                        let (mut n, mut d) = (msg.len(), digits.len());
+                        loop {
+                            d -= 1;
+                            digits[d] = b'0' + (n % 10) as u8;
+                            n /= 10;
+                            if n == 0 {
+                                break;
+                            }
+                        }
+                        let end = 5 + digits.len() - d;
+                        header[5..end].copy_from_slice(&digits[d..]);
+                        let mut hasher = sha1dc::Hasher::new();
+                        hasher.update(black_box(&header[..=end]));
+                        hasher.update(black_box(msg));
+                        black_box(hasher.finalize().expect("no collision"));
+                    }
+                },
+                BatchSize::SmallInput,
+            );
+        });
+
         group.bench_function(BenchmarkId::new("sha1-checked", name), |b| {
             b.iter_batched_ref(
                 fresh(lens.clone()),
