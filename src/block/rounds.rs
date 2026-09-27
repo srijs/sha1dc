@@ -396,41 +396,35 @@ pub(crate) fn recompression_step(
     }
 }
 
-/// The chaining value an attack would have had to start from.
+/// The partner's state at the step a hardware backend can start from: 60
+/// for a DV stored at step 58, 64 for one stored at 65.
 ///
-/// The way out from the stored state is what the partner's compression adds
-/// to its input, so the only input the check can accept is this block's
-/// output less that. Nothing here runs backwards.
+/// The SHA-1 instructions run four steps at a time, so they start and stop
+/// only between groups of four. The stored state is the partner's too, and
+/// the steps between it and the nearest boundary are taken here: two forward
+/// from 58, one back from 65. A state is in the order `(A, B, C, D, E)` of the
+/// step it belongs to.
 #[allow(dead_code, reason = "a target with no SHA-1 instructions never asks")]
-pub(crate) fn partner_start(
+pub(crate) fn partner_boundary(
     step: RecompressFrom,
     m1: &Schedule,
     dm: &[u32; 80],
     state: &[u32; 5],
-    chaining_out: &[u32; 5],
 ) -> [u32; 5] {
     let me2 = &Xor { m1, dm };
 
-    let [mut f0, mut f1, mut f2, mut f3, mut f4] = *state;
-    let out = match step {
+    let [mut a, mut b, mut c, mut d, mut e] = *state;
+    match step {
         RecompressFrom::Step58 => {
-            step!(maj, K[2], f0, f1, f2, f3, f4, me2.at(58));
-            step!(maj, K[2], f4, f0, f1, f2, f3, me2.at(59));
-            five!(parity, K[3], f3, f4, f0, f1, f2, me2, 60);
-            five!(parity, K[3], f3, f4, f0, f1, f2, me2, 65);
-            five!(parity, K[3], f3, f4, f0, f1, f2, me2, 70);
-            five!(parity, K[3], f3, f4, f0, f1, f2, me2, 75);
-            [f3, f4, f0, f1, f2]
+            step!(maj, K[2], a, b, c, d, e, me2.at(58));
+            step!(maj, K[2], e, a, b, c, d, me2.at(59));
+            [d, e, a, b, c]
         }
         RecompressFrom::Step65 => {
-            five!(parity, K[3], f0, f1, f2, f3, f4, me2, 65);
-            five!(parity, K[3], f0, f1, f2, f3, f4, me2, 70);
-            five!(parity, K[3], f0, f1, f2, f3, f4, me2, 75);
-            [f0, f1, f2, f3, f4]
+            unstep!(parity, K[3], a, b, c, d, e, me2.at(64));
+            [b, c, d, e, a]
         }
-    };
-
-    core::array::from_fn(|i| chaining_out[i].wrapping_sub(out[i]))
+    }
 }
 
 /// The recompression is the compression itself, run out from a state partway
@@ -486,12 +480,10 @@ mod tests {
             .quickcheck(prop as fn([u32; 80], [u32; 5]) -> bool);
     }
 
-    /// [`partner_start`] must find what the way back finds.
-    ///
-    /// It subtracts the way out from this block's output, which is the
-    /// arithmetic the way back's answer satisfies.
+    /// [`partner_boundary`] must be the state the partner's compression
+    /// reaches at the boundary, from the chaining value the way back finds.
     #[test]
-    fn the_partner_start_is_what_the_way_back_finds() {
+    fn the_partner_boundary_is_on_the_partners_way() {
         fn prop(w: [u32; 80], state: [u32; 5]) -> bool {
             let m1 = Schedule::from_words(w);
             SHA1_DVS.iter().all(|dv| {
@@ -504,7 +496,17 @@ mod tests {
                     &dv.dm,
                     &state,
                 );
-                partner_start(dv.recompress_from, &m1, &dv.dm, &state, &ihvout) == ihvin
+
+                let mut me2 = Schedule::zeroed();
+                for t in 0..80 {
+                    me2[t] = m1[t] ^ dv.dm[t];
+                }
+                let at = match dv.recompress_from {
+                    RecompressFrom::Step58 => 60,
+                    RecompressFrom::Step65 => 64,
+                };
+                partner_boundary(dv.recompress_from, &m1, &dv.dm, &state)
+                    == state_at(&ihvin, &me2, at)
             })
         }
         QuickCheck::new()

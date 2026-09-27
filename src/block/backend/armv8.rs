@@ -276,8 +276,10 @@ pub(crate) fn compress_spill(
 /// Whether this candidate is the attack it is a candidate for.
 ///
 /// The `aarch64` half of [`Backend::is_attack`], which says why it runs this
-/// way round. The chaining value it starts from is worked out here rather
-/// than handed in, so it never leaves the vector registers.
+/// way round. Both halves run on the SHA-1 instructions, from the partner's
+/// state at the nearest group boundary, step 60 or 64: out to step 80, which
+/// gives the chaining value an attack would have had to start from, and then
+/// in from that value, which must arrive back at the same state.
 ///
 /// [`Backend::is_attack`]: crate::block::Backend::is_attack
 #[inline]
@@ -289,51 +291,61 @@ pub(crate) fn recompress(
     state: &[u32; 5],
     chaining_out: &[u32; 5],
 ) -> bool {
-    let target = rounds::partner_start(step, m1, dm, state, chaining_out);
+    let at = rounds::partner_boundary(step, m1, dm, state);
 
-    let mut abcd = load_abcd(&target);
-    let start = abcd;
-    let mut e0 = target[4];
-    let mut e1;
+    let mut abcd = load_abcd(&at);
+    let mut e = at[4];
 
-    /// Four rounds. `vsha1h` carries the fifth word, which alternates between
-    /// the two names so that neither waits on the round that just used it.
+    /// Four rounds on group `$g` of the partner schedule. `vsha1h` gives the
+    /// fifth word of the group after, from the state before this one.
     macro_rules! group {
-        ($f:ident, $k:expr, $ein:ident, $eout:ident, $g:expr) => {{
+        ($f:ident, $k:expr, $g:expr) => {{
             let wk = wk::<{ 4 * $g }>(m1, dm, $k);
-            $eout = vsha1h_u32(vgetq_lane_u32(abcd, 0));
-            abcd = $f(abcd, $ein, wk);
+            let next = vsha1h_u32(vgetq_lane_u32(abcd, 0));
+            abcd = $f(abcd, e, wk);
+            e = next;
         }};
     }
 
-    group!(vsha1cq_u32, K[0], e0, e1, 0);
-    group!(vsha1cq_u32, K[0], e1, e0, 1);
-    group!(vsha1cq_u32, K[0], e0, e1, 2);
-    group!(vsha1cq_u32, K[0], e1, e0, 3);
-    group!(vsha1cq_u32, K[0], e0, e1, 4);
+    // Out to step 80, from 60 or from 64.
+    if let RecompressFrom::Step58 = step {
+        group!(vsha1pq_u32, K[3], 15);
+    }
+    group!(vsha1pq_u32, K[3], 16);
+    group!(vsha1pq_u32, K[3], 17);
+    group!(vsha1pq_u32, K[3], 18);
+    group!(vsha1pq_u32, K[3], 19);
 
-    group!(vsha1pq_u32, K[1], e1, e0, 5);
-    group!(vsha1pq_u32, K[1], e0, e1, 6);
-    group!(vsha1pq_u32, K[1], e1, e0, 7);
-    group!(vsha1pq_u32, K[1], e0, e1, 8);
-    group!(vsha1pq_u32, K[1], e1, e0, 9);
+    // The feed-forward adds the input to the state at 80, so the only input
+    // that gives this block's output is the output less that state.
+    abcd = vsubq_u32(load_abcd(chaining_out), abcd);
+    e = chaining_out[4].wrapping_sub(e);
 
-    group!(vsha1mq_u32, K[2], e0, e1, 10);
-    group!(vsha1mq_u32, K[2], e1, e0, 11);
-    group!(vsha1mq_u32, K[2], e0, e1, 12);
-    group!(vsha1mq_u32, K[2], e1, e0, 13);
-    group!(vsha1mq_u32, K[2], e0, e1, 14);
+    // In from there, as far as the state the way out started from.
+    group!(vsha1cq_u32, K[0], 0);
+    group!(vsha1cq_u32, K[0], 1);
+    group!(vsha1cq_u32, K[0], 2);
+    group!(vsha1cq_u32, K[0], 3);
+    group!(vsha1cq_u32, K[0], 4);
 
-    group!(vsha1pq_u32, K[3], e1, e0, 15);
-    group!(vsha1pq_u32, K[3], e0, e1, 16);
-    group!(vsha1pq_u32, K[3], e1, e0, 17);
-    group!(vsha1pq_u32, K[3], e0, e1, 18);
-    group!(vsha1pq_u32, K[3], e1, e0, 19);
+    group!(vsha1pq_u32, K[1], 5);
+    group!(vsha1pq_u32, K[1], 6);
+    group!(vsha1pq_u32, K[1], 7);
+    group!(vsha1pq_u32, K[1], 8);
+    group!(vsha1pq_u32, K[1], 9);
 
-    // Feed-forward.
-    let mut ends_on = [0u32; 5];
-    store_abcd(&mut ends_on, vaddq_u32(abcd, start));
-    ends_on[4] = e0.wrapping_add(target[4]);
+    group!(vsha1mq_u32, K[2], 10);
+    group!(vsha1mq_u32, K[2], 11);
+    group!(vsha1mq_u32, K[2], 12);
+    group!(vsha1mq_u32, K[2], 13);
+    group!(vsha1mq_u32, K[2], 14);
 
-    crate::block::xor(&ends_on, chaining_out) == 0
+    if let RecompressFrom::Step65 = step {
+        group!(vsha1pq_u32, K[3], 15);
+    }
+
+    let mut reached = [0u32; 5];
+    store_abcd(&mut reached, abcd);
+    reached[4] = e;
+    crate::block::xor(&reached, &at) == 0
 }

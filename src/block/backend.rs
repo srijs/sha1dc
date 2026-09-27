@@ -175,9 +175,10 @@ impl Backend {
     /// only direction they go. One without keeps to the way back, cheaper in
     /// steps.
     ///
-    /// Forwards runs all eighty rounds where the check reaches only step 58
-    /// or 65. The steps between are a bijection, so the two are the same
-    /// test, and the whole way needs no state taken out of the middle.
+    /// Forwards stops at step 60 or 64, the group boundary next to the stored
+    /// state, and compares states there rather than chaining values at 80.
+    /// The steps between are a bijection, so the two are the same test, and
+    /// the partner's way out to 80 runs on the instructions too.
     #[inline]
     pub(crate) fn is_attack(
         &self,
