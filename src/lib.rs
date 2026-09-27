@@ -317,6 +317,9 @@ struct Inner {
     /// [`State`]: the compression takes the state alone, so a full buffer is
     /// compressed where it is, and the buffer is not handed to code the
     /// compiler cannot see.
+    ///
+    /// Every byte after those is zero, so `finalize` pads with only the
+    /// marker and the length.
     buffer: [u8; BLOCK_SIZE],
 }
 
@@ -384,6 +387,7 @@ impl Inner {
             // The buffer and the state are different fields, so the block is
             // compressed where it is.
             block::compress(&mut self.state, &self.buffer);
+            self.buffer = [0; BLOCK_SIZE];
         }
 
         let blocks = data.len() / BLOCK_SIZE;
@@ -418,12 +422,13 @@ impl Inner {
         let bit_len = self.len << 3;
         let pos = self.buffered();
 
+        // The bytes after `pos` are zero already, so the padding is only the
+        // marker and the length.
         self.buffer[pos] = 0x80;
-        self.buffer[pos + 1..].fill(0);
 
         if pos + 1 > BLOCK_SIZE - 8 {
             block::compress(&mut self.state, &self.buffer);
-            self.buffer.fill(0);
+            self.buffer = [0; BLOCK_SIZE];
         }
 
         self.buffer[BLOCK_SIZE - 8..].copy_from_slice(&bit_len.to_be_bytes());
