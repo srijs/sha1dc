@@ -296,8 +296,11 @@ compress_spill_fn!(
 /// Whether this candidate is the attack it is a candidate for.
 ///
 /// The `x86` half of [`Backend::is_attack`], which says why it runs this way
-/// round. The chaining value it starts from is worked out here rather than
-/// handed in, so it never leaves the vector registers.
+/// round. Both halves run on SHA-NI, from the partner's state at the nearest
+/// group boundary, step 60 or 64: out to step 80, which gives the chaining
+/// value an attack would have had to start from, and then in from that value,
+/// which must arrive back at the same state. Nothing leaves the vector
+/// registers between the two.
 ///
 /// [`Backend::is_attack`]: crate::block::Backend::is_attack
 #[inline]
@@ -309,62 +312,73 @@ fn recompress(
     state: &[u32; 5],
     chaining_out: &[u32; 5],
 ) -> bool {
-    let target = rounds::partner_start(step, m1, dm, state, chaining_out);
+    let at = rounds::partner_boundary(step, m1, dm, state);
 
-    let mut abcd = load_abcd(&target);
-    let abcd_in = abcd;
-    let e_in = _mm_set_epi32(target[4] as i32, 0, 0, 0);
+    let mut abcd = load_abcd(&at);
+    // `abcd` as it was before the latest group. `sha1nexte` takes the next
+    // group's fifth word from it, as `rol(A, 30)` in the top lane.
+    let mut held: __m128i;
 
-    // The first group has no round behind it to carry the working word in,
-    // so it adds the chaining value's fifth word itself.
-    let mut e0 = _mm_add_epi32(e_in, words::<0>(m1, dm));
-    let mut e1 = abcd;
-    abcd = _mm_sha1rnds4_epu32(abcd, e0, 0);
-
-    /// Four rounds. The working word arrives in `live` and the one the next
-    /// four need is put aside in `held`, which is why two alternate.
-    ///
-    /// `compress_spill`'s group carries the schedule too; here there is none
-    /// to carry, only words to read.
+    /// Four rounds. The first of a run has no group behind it to carry the
+    /// fifth word in, so it is added to the words directly.
     macro_rules! group {
-        ($g:expr, $k:expr, $live:ident, $held:ident) => {{
-            let ready = words::<{ 4 * $g }>(m1, dm);
-            $live = _mm_sha1nexte_epu32($live, ready);
-            $held = abcd;
-            abcd = _mm_sha1rnds4_epu32(abcd, $live, $k);
+        (first $e:expr, $g:expr, $k:expr) => {{
+            let live = _mm_add_epi32($e, words::<{ 4 * $g }>(m1, dm));
+            held = abcd;
+            abcd = _mm_sha1rnds4_epu32(abcd, live, $k);
+        }};
+        ($g:expr, $k:expr) => {{
+            let live = _mm_sha1nexte_epu32(held, words::<{ 4 * $g }>(m1, dm));
+            held = abcd;
+            abcd = _mm_sha1rnds4_epu32(abcd, live, $k);
         }};
     }
 
-    group!(1, 0, e1, e0);
-    group!(2, 0, e0, e1);
-    group!(3, 0, e1, e0);
-    group!(4, 0, e0, e1);
+    // Out to step 80, from 60 or from 64.
+    let e_at = _mm_set_epi32(at[4] as i32, 0, 0, 0);
+    match step {
+        RecompressFrom::Step58 => {
+            group!(first e_at, 15, 3);
+            group!(16, 3);
+        }
+        RecompressFrom::Step65 => group!(first e_at, 16, 3),
+    }
+    group!(17, 3);
+    group!(18, 3);
+    group!(19, 3);
 
-    group!(5, 1, e1, e0);
-    group!(6, 1, e0, e1);
-    group!(7, 1, e1, e0);
-    group!(8, 1, e0, e1);
-    group!(9, 1, e1, e0);
+    // The feed-forward adds the input to the state at 80, so the only input
+    // that gives this block's output is the output less that state. The
+    // fifth word at 80 is in the top lane, and the others are zero.
+    let e_80 = _mm_sha1nexte_epu32(held, _mm_setzero_si128());
+    abcd = _mm_sub_epi32(load_abcd(chaining_out), abcd);
+    let e_in = _mm_sub_epi32(_mm_set_epi32(chaining_out[4] as i32, 0, 0, 0), e_80);
 
-    group!(10, 2, e0, e1);
-    group!(11, 2, e1, e0);
-    group!(12, 2, e0, e1);
-    group!(13, 2, e1, e0);
-    group!(14, 2, e0, e1);
+    // In from there, as far as the state the way out started from.
+    group!(first e_in, 0, 0);
+    group!(1, 0);
+    group!(2, 0);
+    group!(3, 0);
+    group!(4, 0);
 
-    group!(15, 3, e1, e0);
-    group!(16, 3, e0, e1);
-    group!(17, 3, e1, e0);
-    group!(18, 3, e0, e1);
-    group!(19, 3, e1, e0);
+    group!(5, 1);
+    group!(6, 1);
+    group!(7, 1);
+    group!(8, 1);
+    group!(9, 1);
 
-    // Feed-forward.
-    e0 = _mm_sha1nexte_epu32(e0, e_in);
-    abcd = _mm_add_epi32(abcd, abcd_in);
+    group!(10, 2);
+    group!(11, 2);
+    group!(12, 2);
+    group!(13, 2);
+    group!(14, 2);
 
-    let mut ends_on = [0u32; 5];
-    store_abcd(&mut ends_on, abcd);
-    ends_on[4] = _mm_extract_epi32(e0, 3) as u32;
+    if let RecompressFrom::Step65 = step {
+        group!(15, 3);
+    }
 
-    crate::block::xor(&ends_on, chaining_out) == 0
+    let mut reached = [0u32; 5];
+    store_abcd(&mut reached, abcd);
+    reached[4] = _mm_extract_epi32(_mm_sha1nexte_epu32(held, _mm_setzero_si128()), 3) as u32;
+    crate::block::xor(&reached, &at) == 0
 }

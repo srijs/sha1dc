@@ -21,7 +21,7 @@ targets are `neon`, `sse2` and `avx2`, as well as a scalar baseline.
 
 Where available, the implementation also uses SHA-1 hardware instructions on
 `x86_64` and `aarch64`. Detection still does more work per block than plain
-SHA-1, and costs 18% to 23% of throughput, depending on the machine.
+SHA-1, and costs 16% to 22% of throughput, depending on the machine.
 
 ## Usage
 
@@ -52,20 +52,20 @@ can do on the machine. Throughput is in MiB/s, and as a fraction of the
 |---------------------------|------------:|-------------:|-----------------:|
 |                           |    *0.11.0* | *this crate* |    *0.11.0-rc.0* |
 | **AArch64**               |             |              |                  |
-| Apple M4                  | 2985 (100%) |   2285 (77%) |        721 (24%) |
-| Graviton4                 | 1617 (100%) |   1308 (81%) |        409 (25%) |
+| Apple M4                  | 2969 (100%) |   2337 (79%) |        721 (24%) |
+| Graviton4                 | 1618 (100%) |   1335 (82%) |        412 (25%) |
 | **x86-64 with SHA-NI**    |             |              |                  |
-| Sapphire Rapids           | 1926 (100%) |   1480 (77%) |        465 (24%) |
-| Ice Lake                  | 1584 (100%) |   1226 (77%) |        322 (20%) |
-| Zen 4                     | 1844 (100%) |   1509 (82%) |        448 (24%) |
-| Zen 3                     | 1863 (100%) |   1523 (82%) |        418 (22%) |
+| Sapphire Rapids           | 1926 (100%) |   1511 (78%) |        466 (24%) |
+| Ice Lake                  | 1583 (100%) |   1275 (81%) |        322 (20%) |
+| Zen 4                     | 1845 (100%) |   1543 (84%) |        448 (24%) |
+| Zen 3                     | 1864 (100%) |   1559 (84%) |        418 (22%) |
 | **x86-64 without SHA-NI** |             |              |                  |
-| Cascade Lake              |  628 (100%) |    557 (89%) |        330 (53%) |
+| Cascade Lake              |  623 (100%) |    555 (89%) |        330 (53%) |
 
 [`sha1`] and `sha1dc` both take the SHA-1 instructions of the machine,
 SHA-NI on x86 and the ARMv8 ones on the M4 and the Graviton4, and differ in
 whether they detect. The `sha1dc` shortfall from 100% is therefore what
-detection costs: 18% to 23%, depending on the machine. Cascade Lake predates
+detection costs: 16% to 22%, depending on the machine. Cascade Lake predates
 SHA-NI, so both compute SHA-1 in software there, and detection costs 11%.
 
 *The Apple M4 is a laptop; the rest are EC2 metal instances: c8g.metal-24xl
