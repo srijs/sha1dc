@@ -308,11 +308,24 @@ pub fn digest(data: &[u8]) -> Result<Digest, Collision> {
 /// detected collision, which the builder sets.
 #[derive(Clone)]
 struct Inner {
-    h: [u32; STATE_LEN],
+    /// What the compression reads and writes.
+    state: State,
     /// Total number of bytes fed in so far.
     len: u64,
+    /// The bytes of a block not yet complete, which are the message's last
+    /// `len % BLOCK_SIZE`: see [`buffered`](Self::buffered). Kept apart from
+    /// [`State`]: the compression takes the state alone, so a full buffer is
+    /// compressed where it is, and the buffer is not handed to code the
+    /// compiler cannot see.
     buffer: [u8; BLOCK_SIZE],
-    buffer_len: usize,
+}
+
+/// What [`block::compress`] needs: the chaining value, the backend, and the
+/// detection's settings and result. Everything a hasher holds but the buffer
+/// and the length, which only `update` and `finalize` use.
+#[derive(Clone)]
+struct State {
+    h: [u32; STATE_LEN],
     backend: Backend,
     /// Keeps every path scalar, including the UBC check, which the backend
     /// alone does not cover.
@@ -329,96 +342,95 @@ struct Inner {
 impl Inner {
     fn new(builder: Builder, safe_hash: bool) -> Self {
         Self {
-            h: INITIAL_H,
+            state: State {
+                h: INITIAL_H,
+                backend: if builder.scalar_backend {
+                    Backend::scalar()
+                } else {
+                    Backend::new()
+                },
+                scalar_only: builder.scalar_backend,
+                safe_hash,
+                ubc_check: builder.ubc_check,
+                reduced_round_collision: builder.reduced_round_collisions,
+                found_collision: false,
+            },
             len: 0,
             buffer: [0; BLOCK_SIZE],
-            buffer_len: 0,
-            backend: if builder.scalar_backend {
-                Backend::scalar()
-            } else {
-                Backend::new()
-            },
-            scalar_only: builder.scalar_backend,
-            safe_hash,
-            ubc_check: builder.ubc_check,
-            reduced_round_collision: builder.reduced_round_collisions,
-            found_collision: false,
         }
     }
 
+    /// How many bytes the buffer holds. Every byte fed in is either in a
+    /// block compressed or in the buffer, which holds less than a block, so
+    /// this is the length modulo a block. That survives `len` wrapping, as a
+    /// block's size divides 2^64.
+    fn buffered(&self) -> usize {
+        (self.len % BLOCK_SIZE as u64) as usize
+    }
+
     fn update(&mut self, mut data: &[u8]) {
+        // Before the length moves on, which is what says how much is buffered.
+        let pos = self.buffered();
         self.len = self.len.wrapping_add(data.len() as u64);
 
-        if self.buffer_len > 0 {
-            let free = BLOCK_SIZE - self.buffer_len;
-            let take = free.min(data.len());
-            self.buffer[self.buffer_len..self.buffer_len + take].copy_from_slice(&data[..take]);
-            self.buffer_len += take;
+        if pos > 0 {
+            let take = (BLOCK_SIZE - pos).min(data.len());
+            self.buffer[pos..pos + take].copy_from_slice(&data[..take]);
             data = &data[take..];
 
-            if self.buffer_len < BLOCK_SIZE {
+            if pos + take < BLOCK_SIZE {
                 return;
             }
-            let block = self.buffer;
-            self.compress(&block);
-            self.buffer_len = 0;
+            // The buffer and the state are different fields, so the block is
+            // compressed where it is.
+            block::compress(&mut self.state, &self.buffer);
         }
 
         let blocks = data.len() / BLOCK_SIZE;
         let (full, rest) = data.split_at(blocks * BLOCK_SIZE);
         if blocks > 0 {
-            self.compress(full);
+            block::compress(&mut self.state, full);
         }
         self.buffer[..rest.len()].copy_from_slice(rest);
-        self.buffer_len = rest.len();
     }
 
     fn reset(&mut self) {
-        self.h = INITIAL_H;
+        self.state.h = INITIAL_H;
         self.len = 0;
         self.buffer = [0; BLOCK_SIZE];
-        self.buffer_len = 0;
         // Keep the configuration.
-        self.found_collision = false;
+        self.state.found_collision = false;
     }
 
     /// Finishes and reports whether a collision occurred. The caller's own
     /// type defines what a detection means for the digest.
     fn finish(&mut self) -> (Digest, bool) {
         let digest = self.finalize_inner();
-        (digest, self.found_collision)
-    }
-
-    /// Compresses `data`, whose length is a multiple of `BLOCK_SIZE`.
-    fn compress(&mut self, data: &[u8]) {
-        debug_assert_eq!(data.len() % BLOCK_SIZE, 0);
-        block::compress(self, data);
+        (digest, self.state.found_collision)
     }
 
     /// Pads the message and compresses the final block(s).
     ///
     /// This leaves the hasher in an invalid state. It consumes the buffer but
-    /// does not update `buffer_len` or `len`. Each caller must own `self` or
-    /// call [`reset`](Self::reset) immediately after.
+    /// does not update `len`. Each caller must own `self` or call
+    /// [`reset`](Self::reset) immediately after.
     fn finalize_inner(&mut self) -> Digest {
         let bit_len = self.len << 3;
-        let pos = self.buffer_len;
+        let pos = self.buffered();
 
         self.buffer[pos] = 0x80;
         self.buffer[pos + 1..].fill(0);
 
         if pos + 1 > BLOCK_SIZE - 8 {
-            let block = self.buffer;
-            self.compress(&block);
+            block::compress(&mut self.state, &self.buffer);
             self.buffer.fill(0);
         }
 
         self.buffer[BLOCK_SIZE - 8..].copy_from_slice(&bit_len.to_be_bytes());
-        let block = self.buffer;
-        self.compress(&block);
+        block::compress(&mut self.state, &self.buffer);
 
         let mut out = [0u8; DIGEST_SIZE];
-        for (chunk, v) in out.chunks_exact_mut(4).zip(self.h.iter()) {
+        for (chunk, v) in out.chunks_exact_mut(4).zip(self.state.h.iter()) {
             chunk.copy_from_slice(&v.to_be_bytes());
         }
         Digest(out)
@@ -496,7 +508,7 @@ macro_rules! hasher_common {
             /// Finalization hashes the last block, so this can become true
             /// at that point.
             pub const fn collision_detected(&self) -> bool {
-                self.0.found_collision
+                self.0.state.found_collision
             }
         }
 

@@ -13,7 +13,7 @@
 //!
 //! [paper]: https://www.usenix.org/system/files/conference/usenixsecurity17/sec17-stevens.pdf
 
-use crate::{BLOCK_SIZE, Inner, Schedule, ubc_check::RecompressFrom};
+use crate::{BLOCK_SIZE, Schedule, State, ubc_check::RecompressFrom};
 
 mod backend;
 mod rounds;
@@ -29,10 +29,11 @@ struct Scratch {
     state_65: [u32; 5],
 }
 
-/// Compresses `blocks` into the hasher's chaining value, testing each one for
-/// a collision attack.
+/// Compresses `blocks` into the state's chaining value, testing each one for
+/// a collision attack. The length of `blocks` is a multiple of `BLOCK_SIZE`.
 #[inline]
-pub(crate) fn compress(ctx: &mut Inner, blocks: &[u8]) {
+pub(crate) fn compress(ctx: &mut State, blocks: &[u8]) {
+    debug_assert_eq!(blocks.len() % BLOCK_SIZE, 0);
     let backend = ctx.backend;
     let mut s = Scratch {
         m1: Schedule::zeroed(),
