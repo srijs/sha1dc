@@ -104,13 +104,29 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # The guest runs on the libraries under `sysroot`, never the runner's
+      # own. The runner image installs Ubuntu's amd64v3 packages, whose glibc
+      # assumes AVX2, so running it under a `cpu` without AVX2 (Nehalem,
+      # Denverton) dies of SIGILL before a test starts. The *-cross packages
+      # are built for the baseline of their architecture.
+      #
+      # `-L` alone is not enough: QEMU serves the guest a path from `sysroot`
+      # only when it exists there and otherwise quietly hands it the host's.
+      # The guest's loader reads the host's /etc/ld.so.cache, which names
+      # /usr/lib/<triple>/libc.so.6, a path the cross packages do not have, so
+      # libc came from the host. `-E LD_LIBRARY_PATH=/lib` makes the loader
+      # look in /lib first, which `-L` maps into `sysroot`. `loader` is the
+      # program interpreter, used to check where every library resolves.
       matrix:
         include:
-          - { name: s390x big-endian, target: s390x-unknown-linux-gnu, cpu: max, block: scalar, ubc_check: scalar, deps: gcc-s390x-linux-gnu }
-          - { name: i686, target: i686-unknown-linux-gnu, cpu: max, block: sha-ni, ubc_check: avx2, deps: gcc-multilib }
-          - { name: i586, target: i586-unknown-linux-gnu, cpu: max, block: sha-ni, ubc_check: scalar, deps: gcc-multilib }
-          - { name: x86_64 sse2, target: x86_64-unknown-linux-gnu, cpu: Nehalem, block: sse2, ubc_check: sse2 }
-          - { name: x86_64 atom, target: x86_64-unknown-linux-gnu, cpu: Denverton, block: sha-ni, ubc_check: sse2 }
+          - { name: s390x big-endian, target: s390x-unknown-linux-gnu, qemu: qemu-s390x, cpu: max, block: scalar, ubc_check: scalar, sysroot: /usr/s390x-linux-gnu, loader: lib/ld64.so.1, deps: gcc-s390x-linux-gnu }
+          - { name: i686, target: i686-unknown-linux-gnu, qemu: qemu-i386, cpu: max, block: sha-ni, ubc_check: avx2, sysroot: /usr/i686-linux-gnu, loader: lib/ld-linux.so.2, deps: gcc-multilib libc6-i386-cross libgcc-s1-i386-cross }
+          - { name: i586, target: i586-unknown-linux-gnu, qemu: qemu-i386, cpu: max, block: sha-ni, ubc_check: scalar, sysroot: /usr/i686-linux-gnu, loader: lib/ld-linux.so.2, deps: gcc-multilib libc6-i386-cross libgcc-s1-i386-cross }
+          - { name: x86_64 sse2, target: x86_64-unknown-linux-gnu, qemu: qemu-x86_64, cpu: Nehalem, block: sse2, ubc_check: sse2, sysroot: /usr/x86_64-linux-gnu, loader: lib64/ld-linux-x86-64.so.2, deps: libc6-amd64-cross libgcc-s1-amd64-cross }
+          - { name: x86_64 atom, target: x86_64-unknown-linux-gnu, qemu: qemu-x86_64, cpu: Denverton, block: sha-ni, ubc_check: sse2, sysroot: /usr/x86_64-linux-gnu, loader: lib64/ld-linux-x86-64.so.2, deps: libc6-amd64-cross libgcc-s1-amd64-cross }
+    env:
+      QEMU_RUN: ${{ matrix.qemu }} -cpu ${{ matrix.cpu }} -L ${{ matrix.sysroot }} -E LD_LIBRARY_PATH=/lib
+      CARGO_TARGET_S390X_UNKNOWN_LINUX_GNU_LINKER: s390x-linux-gnu-gcc
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -121,15 +137,29 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-user ${{ matrix.deps }}
+      - name: Check that the guest's libraries come from the sysroot
+        run: |
+          bin=$(cargo test -p sha1dc --all-features --target ${{ matrix.target }} --no-run --message-format=json \
+            | jq -r 'select(.executable != null) | .executable' | head -n 1)
+          libs=$($QEMU_RUN "${{ matrix.sysroot }}/${{ matrix.loader }}" --list "$bin")
+          echo "$libs"
+          for path in $(echo "$libs" | awk '$2 == "=>" { print $3 }'); do
+            case "$path" in
+              ${{ matrix.sysroot }}/*) ;;
+              *) if [ ! -e "${{ matrix.sysroot }}$path" ]; then
+                   echo "::error::$path resolves outside ${{ matrix.sysroot }}, so QEMU hands the guest the host's copy"
+                   exit 1
+                 fi ;;
+            esac
+          done
       - name: Test
         env:
           SHA1DC_EXPECT_BLOCK: ${{ matrix.block }}
           SHA1DC_EXPECT_UBC_CHECK: ${{ matrix.ubc_check }}
-          CARGO_TARGET_S390X_UNKNOWN_LINUX_GNU_LINKER: s390x-linux-gnu-gcc
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: qemu-x86_64 -cpu ${{ matrix.cpu }}
-          CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_RUNNER: qemu-i386 -cpu ${{ matrix.cpu }} -L /usr/i686-linux-gnu
-          CARGO_TARGET_I586_UNKNOWN_LINUX_GNU_RUNNER: qemu-i386 -cpu ${{ matrix.cpu }} -L /usr/i686-linux-gnu
-          CARGO_TARGET_S390X_UNKNOWN_LINUX_GNU_RUNNER: qemu-s390x -cpu ${{ matrix.cpu }} -L /usr/s390x-linux-gnu
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: ${{ env.QEMU_RUN }}
+          CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_RUNNER: ${{ env.QEMU_RUN }}
+          CARGO_TARGET_I586_UNKNOWN_LINUX_GNU_RUNNER: ${{ env.QEMU_RUN }}
+          CARGO_TARGET_S390X_UNKNOWN_LINUX_GNU_RUNNER: ${{ env.QEMU_RUN }}
         run: cargo test -p sha1dc --all-features --target ${{ matrix.target }}
 
   wasm:
