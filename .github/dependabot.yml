@@ -2,11 +2,15 @@ version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
+    # The published crate has no dependencies: everything here is tooling
+    # (tests, `codegen`, `bench`, `fuzz`), so take it all in one monthly PR.
+    # Security updates don't wait for the schedule.
     schedule:
-      interval: weekly
+      interval: monthly
     groups:
-      dev-dependencies:
-        dependency-type: development
+      tooling:
+        patterns:
+          - "*"
 
   - package-ecosystem: github-actions
     directory: /
