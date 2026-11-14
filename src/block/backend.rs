@@ -17,7 +17,14 @@ use crate::{BLOCK_SIZE, Schedule};
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
 mod armv8;
 mod scalar;
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+// Not on the soft-float targets, where Rust refuses to enable SSE in a
+// function (rust-lang/rust#117938): x86_64's lack SSE2, which every other
+// x86_64 target has, and 32-bit x86's only one is `i686-unknown-uefi`, which
+// otherwise looks like i586 (no SSE2 baseline, SHA-NI detected at run time).
+#[cfg(any(
+    all(target_arch = "x86_64", target_feature = "sse2"),
+    all(target_arch = "x86", not(target_os = "uefi"))
+))]
 mod x86;
 
 /// Whether this CPU has the SHA-1 instructions [`armv8`] needs.
@@ -39,7 +46,10 @@ fn has_sha1_instructions() -> bool {
 
 #[derive(Clone, Copy)]
 enum Repr {
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(any(
+        all(target_arch = "x86_64", target_feature = "sse2"),
+        all(target_arch = "x86", not(target_os = "uefi"))
+    ))]
     ShaNi(x86::ShaNi),
     #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
     Armv8,
@@ -59,7 +69,10 @@ pub(crate) struct Backend(Repr);
 
 impl Backend {
     pub(crate) fn new() -> Self {
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        #[cfg(any(
+            all(target_arch = "x86_64", target_feature = "sse2"),
+            all(target_arch = "x86", not(target_os = "uefi"))
+        ))]
         if let Some(sha_ni) = x86::ShaNi::detect() {
             return Self(Repr::ShaNi(sha_ni));
         }
@@ -101,7 +114,10 @@ impl Backend {
         state_65: &mut [u32; 5],
     ) {
         match self.0 {
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(any(
+                all(target_arch = "x86_64", target_feature = "sse2"),
+                all(target_arch = "x86", not(target_os = "uefi"))
+            ))]
             Repr::ShaNi(sha_ni) => sha_ni.compress_spill(state, block, m1, state_58, state_65),
             #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             Repr::Armv8 => {
@@ -156,7 +172,10 @@ impl Backend {
                 let _ = (m1, need_58, state_58, state_65);
             }
             // As `sha1rnds4` holds them: reversed, with E + W on the end.
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(any(
+                all(target_arch = "x86_64", target_feature = "sse2"),
+                all(target_arch = "x86", not(target_os = "uefi"))
+            ))]
             Repr::ShaNi(_) => {
                 for (s, t) in [(&mut *state_58, 60), (&mut *state_65, 64)] {
                     *s = [s[3], s[2], s[1], s[0], s[4].wrapping_sub(m1[t])];
@@ -189,7 +208,10 @@ impl Backend {
         chaining_out: &[u32; 5],
     ) -> bool {
         match self.0 {
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(any(
+                all(target_arch = "x86_64", target_feature = "sse2"),
+                all(target_arch = "x86", not(target_os = "uefi"))
+            ))]
             Repr::ShaNi(sha_ni) => sha_ni.recompress(step, m1, dm, state, chaining_out),
             #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             // SAFETY: `Repr::Armv8` is chosen only where the instructions are.
@@ -232,7 +254,10 @@ mod tests {
 
     fn is_hardware(backend: &Backend) -> bool {
         match backend.0 {
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(any(
+                all(target_arch = "x86_64", target_feature = "sse2"),
+                all(target_arch = "x86", not(target_os = "uefi"))
+            ))]
             Repr::ShaNi(_) => true,
             #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             Repr::Armv8 => true,
@@ -248,7 +273,10 @@ mod tests {
     #[cfg(feature = "std")]
     fn name(backend: &Backend) -> &'static str {
         match backend.0 {
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            #[cfg(any(
+                all(target_arch = "x86_64", target_feature = "sse2"),
+                all(target_arch = "x86", not(target_os = "uefi"))
+            ))]
             Repr::ShaNi(_) => "sha-ni",
             #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
             Repr::Armv8 => "armv8",

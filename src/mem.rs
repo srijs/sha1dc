@@ -10,7 +10,14 @@
 //! its bound at compile time. A mistake there is a build failure or a panic,
 //! never a read out of bounds.
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+// Not on the soft-float targets, where Rust refuses to enable SSE in a
+// function (rust-lang/rust#117938): x86_64's lack SSE2, which every other
+// x86_64 target has, and 32-bit x86's only one is `i686-unknown-uefi`, which
+// otherwise looks like i586 (no SSE2 baseline, SHA-NI detected at run time).
+#[cfg(any(
+    all(target_arch = "x86_64", target_feature = "sse2"),
+    all(target_arch = "x86", not(target_os = "uefi"))
+))]
 mod imp {
     #[cfg(target_arch = "x86")]
     use core::arch::x86::*;
@@ -90,8 +97,8 @@ mod imp {
 }
 
 #[cfg(any(
-    target_arch = "x86",
-    target_arch = "x86_64",
+    all(target_arch = "x86_64", target_feature = "sse2"),
+    all(target_arch = "x86", not(target_os = "uefi")),
     all(target_arch = "aarch64", target_feature = "neon")
 ))]
 #[allow(
