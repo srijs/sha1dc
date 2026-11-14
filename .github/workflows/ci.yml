@@ -88,7 +88,8 @@ jobs:
           targets: >-
             riscv64gc-unknown-linux-gnu, powerpc-unknown-linux-gnu, arm64ec-pc-windows-msvc,
             thumbv7em-none-eabi, thumbv6m-none-eabi, wasm32-unknown-unknown,
-            aarch64-unknown-none-softfloat, x86_64-unknown-none
+            aarch64-unknown-none-softfloat, x86_64-unknown-none,
+            x86_64-unknown-uefi, i686-unknown-uefi
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --lib --all-features --target riscv64gc-unknown-linux-gnu
       - run: cargo check --lib --all-features --target powerpc-unknown-linux-gnu
@@ -98,6 +99,12 @@ jobs:
       - run: cargo check --lib --no-default-features --target wasm32-unknown-unknown
       - run: cargo check --lib --no-default-features --target aarch64-unknown-none-softfloat
       - run: cargo check --lib --no-default-features --target x86_64-unknown-none
+      # Soft-float, as above, but with `std`, so run-time detection can't be
+      # what keeps the vector code out (rust-lang/rust#117938).
+      - run: cargo check --lib --all-features --target x86_64-unknown-uefi
+      - run: cargo check --lib --no-default-features --target x86_64-unknown-uefi
+      - run: cargo check --lib --all-features --target i686-unknown-uefi
+      - run: cargo check --lib --no-default-features --target i686-unknown-uefi
 
   emulated:
     name: emulated / ${{ matrix.name }}

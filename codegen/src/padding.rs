@@ -591,22 +591,28 @@ mod tests {
         .collect();
         let last = last_of(conds.iter().copied());
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x0123_4567_89ab_cdef);
-        for r in 0..RESIDUES {
-            let mut survived = [0usize; 32];
-            for _ in 0..DRAWS {
-                let w = block(&mut rng, r);
-                let mut alive = !0u32;
-                for c in &conds {
-                    if (w[c.i] >> c.a ^ w[c.j] >> c.b) & 1 != c.c {
-                        alive &= !c.dvs;
+        // Survivors of each DV, per residue, over `DRAWS` blocks drawn for it.
+        let survived: Vec<[usize; 32]> = (0..RESIDUES)
+            .map(|r| {
+                let mut survived = [0usize; 32];
+                for _ in 0..DRAWS {
+                    let w = block(&mut rng, r);
+                    let mut alive = !0u32;
+                    for c in &conds {
+                        if (w[c.i] >> c.a ^ w[c.j] >> c.b) & 1 != c.c {
+                            alive &= !c.dvs;
+                        }
+                    }
+                    for (d, n) in survived.iter_mut().enumerate() {
+                        *n += (alive >> d & 1) as usize;
                     }
                 }
-                for (d, n) in survived.iter_mut().enumerate() {
-                    *n += (alive >> d & 1) as usize;
-                }
-            }
-            for (d, &n) in survived.iter().enumerate() {
-                let (want, got) = (last.alive[d][r], n as f64 / DRAWS as f64);
+                survived
+            })
+            .collect();
+        for (d, alive) in last.alive.iter().enumerate() {
+            for (r, (&want, survived)) in alive.iter().zip(&survived).enumerate() {
+                let got = survived[d] as f64 / DRAWS as f64;
                 if want == 0.0 || want == 1.0 {
                     assert_eq!(got, want, "DV {d}, residue {r}");
                 } else {
